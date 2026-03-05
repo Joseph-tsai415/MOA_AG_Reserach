@@ -1,0 +1,298 @@
+# =============================================================================
+# Claude Scientific Skills - All Package Requirements
+# Generated from 170+ skills in .claude/skills/
+# Python 3.12+ recommended | Install with: uv pip install -r requirements.txt
+# =============================================================================
+
+# ---------------------
+# Core / Common
+# ---------------------
+requests
+pandas
+numpy
+scipy
+matplotlib
+seaborn
+pillow
+scikit-learn
+networkx
+pyyaml
+lxml
+six
+openpyxl
+psutil
+python-dotenv
+pyarrow
+
+# ---------------------
+# Bioinformatics & Genomics
+# ---------------------
+biopython
+bioservices
+anndata
+arboreto
+cellxgene-census
+deeptools
+flowio
+geniml
+gget
+gtars
+pysam
+scanpy
+scikit-bio
+scvelo
+scvi-tools
+pydeseq2
+spikeinterface
+probeinterface
+neo
+
+# ---------------------
+# Cheminformatics & Drug Discovery
+# ---------------------
+chembl_webresource_client
+datamol
+deepchem
+drugbank-downloader
+bioversions
+fair-esm
+matchms
+medchem
+molfeat
+pubchempy
+rdkit-pypi
+PyTDC
+torchdrug
+
+# ---------------------
+# Molecular Dynamics & Docking
+# ---------------------
+openmm
+mdanalysis
+openff-toolkit
+
+# ---------------------
+# Protein & Structure
+# ---------------------
+esm
+flash-attn
+glycoshield
+rcsb-api
+rcsbsearchapi
+reactome2py
+
+# ---------------------
+# Clinical & Healthcare
+# ---------------------
+lifelines
+pyhealth
+pydicom
+pylibjpeg
+pylibjpeg-libjpeg
+pylibjpeg-openjpeg
+python-gdcm
+idc-index
+histolab
+pathml
+neurokit2
+
+# ---------------------
+# Genomic Databases & APIs
+# ---------------------
+ensembl_rest
+GEOparse
+google-cloud-bigquery
+gsutil
+
+# ---------------------
+# Machine Learning & Deep Learning
+# ---------------------
+torch
+lightning
+deepspeed
+transformers
+datasets
+evaluate
+accelerate
+timm
+stable-baselines3
+gymnasium
+pufferlib
+shap
+umap-learn
+aeon
+timesfm
+hypogenic
+
+# ---------------------
+# Graph Neural Networks
+# ---------------------
+torch_geometric
+pyg_lib
+torch_scatter
+torch_sparse
+torch_cluster
+torch_spline_conv
+
+# ---------------------
+# Bayesian & Statistics
+# ---------------------
+arviz
+statsmodels
+simpy
+pymoo
+
+# ---------------------
+# Visualization
+# ---------------------
+plotly
+kaleido
+dash
+PyPDF2
+pypdf
+pymupdf
+
+# ---------------------
+# Geospatial
+# ---------------------
+geopandas
+rasterio
+fiona
+shapely
+pyproj
+folium
+mapclassify
+contextily
+cartopy
+ipyleaflet
+keplergl
+pydeck
+pythreejs
+dask-geopandas
+xarray
+rioxarray
+pystac-client
+planetary-computer
+geoalchemy2
+osmnx
+laspy
+pylas
+open3d
+rsgislib
+torchgeo
+eo-learn
+earthengine-api
+tensorflow-caney
+libpysal
+esda
+mgwr
+xgboost
+lightgbm
+
+# ---------------------
+# Quantum Computing
+# ---------------------
+cirq
+cirq-google
+cirq-ionq
+cirq-aqt
+cirq-pasqal
+azure-quantum
+pennylane
+pennylane-qiskit
+pennylane-cirq
+pennylane-ionq
+pennylane-rigetti
+qiskit
+qutip
+qutip-qip
+qutip-qtrl
+
+# ---------------------
+# Materials & Physics
+# ---------------------
+astropy
+pymatgen
+mp-api
+fluidsim
+sympy
+
+# ---------------------
+# Documents & Communication
+# ---------------------
+markitdown
+python-pptx
+defusedxml
+pytesseract
+pdf2image
+bibtexparser
+scholarly
+selenium
+crossref-commons
+pylatexenc
+pyzotero
+
+# ---------------------
+# Data Processing
+# ---------------------
+polars
+dask
+vaex
+zarr
+s3fs
+gcsfs
+tiledb-cloud
+
+# ---------------------
+# Lab Automation & Platforms
+# ---------------------
+benchling-sdk
+dxpy
+latch
+modal
+opentrons
+omero-py
+pylabrobot
+rowan-python
+
+# ---------------------
+# Cloud & Integrations
+# ---------------------
+openai
+litellm
+parallel-web
+denario
+edgartools
+uspto-opendata-python
+wandb
+tensorboard
+mlflow
+comet-ml
+neptune
+anthropic
+datacommons-client
+soundfile
+librosa
+zeep
+
+# ---------------------
+# Phylogenetics
+# ---------------------
+ete3
+
+# ---------------------
+# Metabolic Modeling
+# ---------------------
+cobra
+
+# ---------------------
+# Survival Analysis
+# ---------------------
+scikit-survival
+
+# ---------------------
+# Neuropixels (specialized)
+# ---------------------
+kilosort
+spykingcircus
+mountainsort5
