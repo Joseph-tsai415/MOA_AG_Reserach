@@ -30,7 +30,7 @@ At the start of each run, the user must provide:
 ## Execution Pipeline
 
 > **Agent Delegation & Parallelization:**
-> - **Each step must be delegated to a separate sub-agent** using the Agent tool. the orchestrator only passes inputs and collects outputs, never processes raw API data itself.
+> - **Each step must be delegated to a separate sub-agent** using the Agent tool. The orchestrator only passes inputs and collects outputs, never processes raw API data itself.
 > - **Step 1 and Step 2 must run in parallel** (launch both agents simultaneously). Step 3 waits for both to complete.
 > - Steps 3 → 4 → 5 run sequentially, each in its own agent.
 > - Each agent receives: (1) the step instructions from this file, (2) input data paths, (3) the output directory path. The agent writes all outputs to disk; the orchestrator reads only the final summary.
