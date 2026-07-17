@@ -1,9 +1,11 @@
 # MOA-AG Research Pipeline — Chief Scientific Agent Operating Manual
 
-> **Pipeline version:** v10.0 · **Status:** Active · **Last updated:** 2026-07-13
+> **Pipeline version:** v11.1 · **Status:** Active · **Last updated:** 2026-07-17
 > **Governing policy:** *Governing Scientific Policy (v9)* — §3 below (MANDATORY; overrides step guidance)
 > **v10 addition:** data-driven **Transcriptomics Track** (measured disease signature + connectivity-map reversal) woven into Steps 2–5 — see §3 and the inline "🧬 v10 transcriptomics" callouts. Runs when expression data is available; otherwise the run documents its absence.
-> **Standard of practice:** Network Pharmacology Evaluation Method Guidance (WFCMS, 2021) — *reliability · standardization · rationality*
+> **v11 addition:** a **Step 0 — Provenance & Plausibility Gate** (validate the *object of study* before any fetch), plus **exposure-realism**, **data-lineage integrity**, **enrichment integrity**, and a **route-matched Validation Roadmap + go/no-go Lead Assessment** as the culminating output. Motivated by the Session-9 review (a wrong 5-herb composition of a *topical* cosmetic formula analysed as a systemic AD drug; a stale ungated 81-gene set leaked into an appendix and inflated the pathway enrichment). See §3 and the inline "🛡️ v11" callouts.
+> **v11.1 addition:** a **Final-report quality gate** — every deliverable is QA'd before shipping by a read-only **`report-qa` agent** (`.claude/agents/report-qa.md`, the orchestrator's QA teammate) that routes by report type to the matching reporting standard (**PRISMA 2020 · ARRIVE 2.0 · STROBE · CONSORT · TRIPOD+AI · …**), grades certainty with **GRADE**, and applies the project's house rules. Detailed criteria + the official source checklists are bundled in the **`reporting-standards` skill**; `CLAUDE.md` stays light. See §3.
+> **Standard of practice:** Network Pharmacology Evaluation Method Guidance (WFCMS, 2021) — *reliability · standardization · rationality*; reporting held to **PRISMA 2020 / GRADE / AMSTAR-2** (§3).
 
 ---
 
@@ -11,15 +13,17 @@
 
 Two independent identifiers; **every run records both**.
 
-- **Pipeline version `vN`** — the methodology/policy generation a run follows. **Current = v10.** Bump only when the governing policy or a step's methodology changes materially, and log it in *Version History*.
+- **Pipeline version `vN`** — the methodology/policy generation a run follows. **Current = v11.1.** Bump only when the governing policy or a step's methodology changes materially, and log it in *Version History*.
 - **Session number** — the isolation index of a single analysis run (`results/{...}_sessionN`). Independent of pipeline version; increments per re-run of the same compound/disease (see *User Inputs → Session isolation*).
 
-Every generated report header MUST state both, e.g. **"MOA-AG Research v10 · Session 9"**. Session8 predates this policy and ran under **v8** methodology — do not retro-label it.
+Every run **records** both (pipeline version + session number) for traceability — but only in a **compact methods / reproducibility footer** at the end of the report, **never** as a headline, cover branding, or repeated in-body section labels (see §5 *Report voice*). Readers judge the science, not the pipeline version. Session8 predates this policy and ran under **v8** methodology — do not retro-label it.
 
 ## Version History
 
 | Version | Date | Summary |
 |---|---|---|
+| **v11.1** | 2026-07-17 | Added a **Final-report quality gate** (§3): every deliverable is QA'd before shipping by a read-only **`report-qa` agent** (`.claude/agents/report-qa.md`) running as the orchestrator's QA teammate — it routes by report type to the matching EQUATOR standard (**PRISMA 2020 / ARRIVE 2.0 / STROBE / CONSORT / TRIPOD+AI / …**), grades certainty with **GRADE**, appraises conduct with **AMSTAR-2 / Cochrane RoB**, and overlays the project house rules (evidence tiers ≈ GRADE, specificity ≈ risk-of-bias, citation grounding, lineage audit). Fix-until-**SHIP** loop; writes `report_qa_review.md`. Detailed criteria + bundled official source checklists live in the **`reporting-standards` skill** (`.claude/skills/reporting-standards/`) — **no new Steps 0–5 methodology, and `CLAUDE.md` stays light**. |
+| **v11.0** | 2026-07-14 | Added **Step 0 — Provenance & Plausibility Gate** and four reliability upgrades after the Session-9 external review: (1) **provenance** — validate authentic formula composition, **route of administration**, and indication plausibility before Steps 1–5 (a topical cosmetic mask must not be modelled as a systemic drug); (2) **route-feasibility** drug-likeness *for the intended route* (skin permeation vs Lipinski) so delivery-implausible constituents can't anchor a mechanism; (3) **data-lineage integrity** — every headline number self-verifies, raw vs scored sets never share a container (fixes the 81-vs-14 leak); (4) **enrichment integrity** — non-specific-umbrella suppression, entity-vs-gene reconciliation, engagement-vs-spillover check (fixes "17 of 14" and the IL-4/IL-13 artefact). Extends the PAINS gate to **E0 by assay type** (AlphaScreen/qHTS interference), makes GWAS/L1000 **no-silent-zero**, and makes the deliverable a **route-matched Validation Roadmap + go/no-go Lead Assessment**. New modules: `provenance`, `route_feasibility`, `enrichment_integrity`, `lineage_audit`, `validation_roadmap`. |
 | **v10.0** | 2026-07-13 | Added the **Transcriptomics Track** (first measured-data layer): data-driven disease signature from patient RNA-seq (`geo-database` → `pydeseq2`; optional single-cell `scanpy`) that **augments** List B, plus **connectivity-map signature reversal** in Step 4 as a measured efficacy signal. Conditional — runs when a suitable expression dataset is available, else documented as absent. Builds on (does not replace) the v9 framework. |
 | **v9.0** | 2026-07-13 | Added **Governing Scientific Policy**: evidence tiers (E0–E4 / REJECT), specificity controls (permutation *p*, network proximity z_c ≤ −0.15, decoy disease), citation-grounding gate, data-derived directionality + L1/L2/L3 validation, per-step mandatory controls, and a significance-based HALT. Motivated by the session8 reliability audit (fabricated citations, PAINS contamination, no specificity test). |
 | v8 | ≤ 2026-03 | Baseline 5-step network-pharmacology pipeline (Drug→Target · Disease→Gene · Intersection · Pathway · Hypothesis); Qibai San / Atopic Dermatitis sessions. |
@@ -28,7 +32,7 @@ Every generated report header MUST state both, e.g. **"MOA-AG Research v10 · Se
 
 1. **Role, Objective & Scope of Work** — capabilities, limits, and what to decline
 2. **User Inputs** — compounds, disease, folder & session rules
-3. **Governing Scientific Policy (v9)** — MANDATORY framework (evidence tiers · specificity · grounding)
+3. **Governing Scientific Policy (v9)** — MANDATORY framework (evidence tiers · specificity · grounding · PRISMA/GRADE/AMSTAR-2 report-quality gate)
 4. **Execution Pipeline** — Steps 1–5
 5. **Rules & Constraints** — execution strategy, skill roles, hallucination policy
 6. **Available Skills Reference**
@@ -121,26 +125,41 @@ At the start of each run, the user must provide:
 
 **3. Citation grounding.** Every `(claim, citation)` pair MUST pass an automated gate before entering any report: the PMID/DOI resolves **AND** the retrieved title/abstract supports the *specific* sentence. Mismatches are **rejected, not softened**. (LLMs fabricate 18–55% of citations using real author names + plausible titles + credible journals — exactly the failure that put fake Budzynska/Kim/Papp citations into session8.)
 
+**4. 🛡️ v11 — Provenance & exposure realism.** Validate the *object of study before any data is fetched* (Step 0, `provenance.py`): authentic formula composition + herb count, **route of administration** (topical vs oral/systemic), and indication plausibility. Every pharmacology claim thereafter must be consistent with the route — a **topical** formula must **not** be analysed with systemic pharmacology (plasma affinities, responder trial populations, systemic-drug comparators); that is a category error, not a caveat. Molecules must also clear drug-likeness **for the intended route** (`route_feasibility.py`): a delivery-implausible constituent (e.g. MW 727 or LogP 7.2 for a topical) may not anchor a mechanism. (Session-9 analysed a wrong 5-herb composition of the topical cosmetic mask 七白散 as a systemic atopic-dermatitis drug — a category error before a single gene was fetched.)
+
+**5. 🛡️ v11 — Data-lineage & enrichment integrity.** Every reported set gets **one canonical variable**; the raw intersection and the scored/gated set may **never share a container**, and every headline number is **recomputed at write-time and asserted equal** to its claimed provenance — a table whose row count ≠ its stated count **fails the run** (`lineage_audit.py`; fixes the Session-9 leak where the ungated 81-gene set was rendered under a "14 hubs" header). Pathway enrichment must (`enrichment_integrity.py`): report **"N of M input genes"** (never surface Reactome `found`, which counts entities/isoforms and can exceed the input-gene count — "17 of 14"); **suppress non-specific umbrellas** (Immune System, Signaling by Interleukins, Disease, Metabolism…); and refuse to claim pathway **engagement** when the pathway's *defining* genes are absent from the hub set (generic downstream effectors light up interleukin umbrellas without the compound touching IL-4/IL-13).
+
 ### Per-step mandatory additions
 
-Each pipeline step in **§4 states its own v9 controls inline** (in a "⚠️ v9 mandatory controls" callout, with the new output columns). **Those inline blocks are authoritative — read and apply them when executing each step.** In brief: Step 1 = organism filter + PAINS gate + evidence typing; Step 2 = genetic-evidence priority + axis reconstruction; Step 3 = overlap significance + network proximity + decoy; Step 4 = data-derived directionality + L1/L2/L3 + conflict log; Step 5 = citation-grounding gate + confidence tiers + benchmark. **v10** adds a Transcriptomics Track to Steps 2–5 (🧬 callouts), conditional on data availability.
+Each pipeline step in **§4 states its own v9 controls inline** (in a "⚠️ v9 mandatory controls" callout, with the new output columns). **Those inline blocks are authoritative — read and apply them when executing each step.** In brief: Step 1 = organism filter + PAINS gate + evidence typing; Step 2 = genetic-evidence priority + axis reconstruction; Step 3 = overlap significance + network proximity + decoy; Step 4 = data-derived directionality + L1/L2/L3 + conflict log; Step 5 = citation-grounding gate + confidence tiers + validation plan + go/no-go assessment. **v10** adds a Transcriptomics Track to Steps 2–5 (🧬 callouts), conditional on data availability.
 
-### New HALT conditions (Step 3)
-In addition to "no intersection": **HALT if `overlap_p > 0.05` OR `z_c > −0.15`** — the overlap is statistically indistinguishable from random. Write the halt report explaining the failed specificity test; do not proceed to Steps 4–5.
+### HALT conditions
+- **Step 0 (v11):** HALT if the provenance gate returns **HALT** — composition mismatch (analysing the wrong formula), unverified formula, or a **topical/external** formula about to be modelled systemically. RE-FRAME (label an explicit repurposing hypothesis) if the indication is non-traditional. Write `HALT_provenance.md` / surface to the user; do not proceed on a mis-specified object of study.
+- **Step 3:** in addition to "no intersection": **HALT if `overlap_p > 0.05` OR `z_c > −0.15`** — the overlap is statistically indistinguishable from random. Write the halt report explaining the failed specificity test; do not proceed to Steps 4–5.
+- **Any step (v11):** the **lineage self-audit** must pass — a run with any table/header count mismatch or gated-set leak is **not a valid deliverable** until fixed.
 
 ### Required reusable modules (shared package `moa_lib/` at project root)
-`promiscuity_filter.py` (organism + PAINS) · `evidence_schema.py` (tier enum + confidence) · `specificity_controls.py` (permutation + `d_c`/`z_c` + decoy) · `directionality.py` (ChEMBL action_type + L1000 + conflict log) · `citation_grounding.py` (PMID/DOI resolve + abstract-claim check) · `benchmark_recall.py` (recall/precision vs ground truth) · `transcriptomics.py` (**v10** — `geo-database` fetch + `pydeseq2` DE + optional `scanpy` + LINCS L1000 connectivity reversal).
+`evidence_schema.py` (tier enum + confidence) · `promiscuity_filter.py` (organism + PAINS + **v11** E0 assay-interference scrutiny) · `citation_grounding.py` (PMID/DOI resolve + abstract-claim check) · `specificity_controls.py` (permutation + `d_c`/`z_c` + decoy) · `directionality.py` (ChEMBL action_type + L1000 + conflict log) · `transcriptomics.py` (**v10** — `geo-database` + `pydeseq2` + LINCS L1000 reversal) · **v11:** `provenance.py` (Step-0 composition/route/indication gate) · `route_feasibility.py` (drug-likeness for topical/oral route) · `enrichment_integrity.py` (umbrella suppression + entity↔gene + engagement check) · `lineage_audit.py` (headline-number self-audit) · `validation_roadmap.py` (falsifiable experiment plan + go/no-go Lead Assessment).
+> **Retired:** `benchmark_recall.py` (the v8-vs-v9 recall/precision "benchmark"). It compared pipeline versions, not biology — it does **not** inform a research decision. The file stays in `moa_lib` for methods work but is **not** a Step-5 control or a report output. Do not include a benchmark/scorecard section in the report.
 
 ### Novelty / non-consensus paths
 Genuinely novel (unpublished) mechanisms are **admitted** — via the **E3 predicted** and **L3 docking** tiers, gated by the specificity controls, and shipped with a falsifying experiment. They are the point of discovery. They are **never** dressed as E1 citations. A novel bridge and a hallucination look identical to a literature check; they look completely different to this framework. The **v10 Transcriptomics Track** is the strongest tool for validating a non-consensus path: signature reversal measures whether a compound reverses the disease state *regardless of whether the mechanism was ever published*.
 
-### Transcriptomics Track (v10) — conditional data layer
-The pipeline's first **measured** evidence source: it injects patient/perturbation expression data so hypotheses are tested against reality, not only against prior knowledge. **Conditional & opportunistic** — run it when a suitable dataset exists; when none is available, proceed on the v9 knowledge-driven path and **state the absence** in the report (never fabricate a signature).
+### Transcriptomics Track (v10) — conditional data layer  ·  **IMPLEMENTED in `moa_lib/transcriptomics.py`**
+The pipeline's first **measured** evidence source: it injects patient/perturbation expression data so hypotheses are tested against reality, not only against prior knowledge. **Conditional & opportunistic** — run it when a suitable dataset exists; when none is available, proceed on the v9 knowledge-driven path and **state the absence** in the report (never fabricate a signature). API surface: `disease_signature()`, `fetch_geo()`, `l1000_reversers()`, `compound_reversal()`, `reversal_score()`.
 
-- **Data-driven disease signature (Step 2)** — retrieve a `{DISEASE}` dataset (`geo-database`: lesional vs control), compute differential expression (`pydeseq2` for bulk; optionally `scanpy`/`scvi-tools` for single-cell cell-type resolution). This **augments — does not replace —** List B: genes that are both database-associated **and** measured-DE are up-weighted and their `direction_in_disease` is confirmed from data.
-- **Connectivity-map signature reversal (Step 4)** — test whether `{COMPOUND}`'s LINCS L1000 perturbation signature **reverses** the disease DE signature (connectivity score −1 = full reversal → therapeutic; +1 = mimics disease). A functional, artifact-resistant efficacy signal that complements network proximity. Note L1000 reproducibility caveats and missing signatures for many TCM compounds — **report coverage honestly**.
+- **Data-driven disease signature (Step 2)** — `fetch_geo()` retrieves a `{DISEASE}` dataset (lesional vs control); `disease_signature(counts, metadata, cond, test, ref, engine=...)` computes DE. **DE engine:** default `engine='welch'` (log2-CPM + Welch t-test + BH-FDR — pure numpy/scipy, robust, always runs); `engine='pydeseq2'` is **opt-in** (full DESeq2 NB modeling — it **segfaults on this Windows env**, so it is not the default). Optional `scanpy`/`scvi-tools` for single-cell. This **augments — does not replace —** List B: genes both database-associated **and** measured-DE are up-weighted and their `direction_in_disease` confirmed from data.
+- **Connectivity-map signature reversal (Step 4)** — `l1000_reversers(up, dn)` / `compound_reversal(name, up, dn)` test whether the disease signature is **reversed** via the **key-free L1000CDS2 API** (`maayanlab.cloud/L1000CDS2/query`, `aggravate=false` = reversers) — **no cmapPy, no CLUE key**. CMap convention: score −1 = full reversal → therapeutic; +1 = mimics disease. Report coverage **honestly**: many TCM natural products have **no** L1000 signature — that is a coverage gap, **not** evidence of non-efficacy.
 - **Endotype stratification (Step 5)** — where the signature separates patient subgroups (e.g., Th2-high vs Th2-low), fold it into the Responder Definition.
 - **Scope guard** — transcriptomic analysis is in scope **only with real data** (user-provided or a named public dataset), never simulated (see §1 Scope of Work).
+
+### 📋 Final-report quality gate — held to EQUATOR reporting standards (v11.1)
+
+> Every final deliverable — a `results/…` MOA report or a `reviews/…` synthesis — must **pass QA before it ships**, and QA is **delegated to the read-only `report-qa` agent** (`.claude/agents/report-qa.md`), run **last** as the orchestrator's QA teammate (see *Agent-team QA loop* below). Keeping the detailed checklist in the agent — not here — is deliberate: this file stays light. The agent auto-detects the report type, routes to the matching reporting standard (**PRISMA 2020 · ARRIVE 2.0 · STROBE · CONSORT · TRIPOD+AI · …**), grades certainty with **GRADE**, appraises conduct with **AMSTAR-2 / Cochrane RoB**, and overlays this project's house rules (evidence tiers, citation grounding, number/lineage reconciliation, specificity, exposure realism, report voice). It returns structured feedback with a **SHIP / FIX-FIRST / BLOCK** verdict; the orchestrator fixes and re-invokes it until **SHIP**, then saves the review as the internal artifact `report_qa_review.md`. A `block` verdict or any unresolved issue means the report is **not a valid deliverable**.
+
+- **Essential reference documents** — bundled in the **`reporting-standards` skill** (`.claude/skills/reporting-standards/`, the official Claude Code home for agent reference material): `references/REPORTING_STANDARDS.md` (catalogue by report type) + the official source checklists (`references/PRISMA_2020_checklist.docx` + `references/sources/` = ARRIVE 2.0 · STROBE · CONSORT 2025 · STARD · TRIPOD+AI · CARE · CHEERS · SPIRIT). The `report-qa` agent invokes this skill.
+- **Evidence-tier ↔ GRADE certainty** (the one mapping worth stating inline): **E0 ≈ High · E1 ≈ Moderate · E2 ≈ Low · E3 ≈ Low/Very-low (hypothesis) · E4 ≈ Very-low.** Report each claim at the **lowest certainty any GRADE domain** (risk-of-bias · inconsistency · indirectness · imprecision · reporting-bias) forces — never the confidence the prose sounds.
+- **Agent-team QA loop:** the main orchestrator drafts → spawns `report-qa` (Agent tool) → the teammate returns its review → the orchestrator applies the blocking fixes → re-invokes until **SHIP** → persists `report_qa_review.md`. The QA agent audits and reports **only**; it never edits the report itself.
 
 ---
 
@@ -151,6 +170,18 @@ The pipeline's first **measured** evidence source: it injects patient/perturbati
 > - **Step 1 and Step 2 must run in parallel** (launch both agents simultaneously). Step 3 waits for both to complete.
 > - Steps 3 → 4 → 5 run sequentially, each in its own agent.
 > - Each agent receives: (1) the step instructions from this file, (2) input data paths, (3) the output directory path. The agent writes all outputs to disk; the orchestrator reads only the final summary.
+
+### Step 0: Provenance & Plausibility Gate (v11 — runs FIRST, before any data fetch)
+
+- **Input:** `{COMPOUNDS}`/formula name + provided herb list, and `{DISEASE}`.
+- **Module:** `provenance.py` (`provenance_gate`), `route_feasibility.py`.
+- **Action:** validate the *object of study* before spending any API call on it:
+  1. **Authentic composition** — resolve the formula against a cited classical/pharmacopoeia source; check herb identity **and count**. If the provided list doesn't match (wrong members, wrong count), **do not silently inherit a prior session's list** — HALT and confirm with the user. *(七白散 is a 7-herb "seven whites"; a 5-herb list is a different preparation.)*
+  2. **Route of administration** — classify topical/external vs oral/systemic from the source. This is a first-class run variable that governs Steps 1 & 5.
+  3. **Indication plausibility** — was the formula ever used for `{DISEASE}` or its class? If not, the run is an explicit **repurposing hypothesis** and is labelled as such, never as established use. *(七白散 is a topical cosmetic whitening/freckle mask — never an atopic-dermatitis therapy.)*
+  4. **Chemical-reality caveat** — a database compound list is **not** the extract; constituent identity/abundance requires LC-MS of the actual preparation. Never imply the scraped compound set *is* what is in the material.
+- **HALT / REFRAME (per §3):** HALT on composition mismatch, unverified formula, or a topical formula about to be modelled systemically; REFRAME (repurposing-hypothesis framing) on a non-traditional indication. Write `HALT_provenance.md` and surface it.
+- **Output:** `step0_provenance.md` (gate verdict, composition diff, route, indication, per-compound route-feasibility) + `data/step0_data.json` (route, action, delivery-implausible list — consumed by Steps 1 & 5).
 
 ### Step 1: Discover Potential Targets (Compounds → Targets)
 
@@ -166,6 +197,10 @@ The pipeline's first **measured** evidence source: it injects patient/perturbati
 > - **PAINS / promiscuity gate** (`rdkit` / `medchem`) — flag polyphenols (gallic acid, catechin, quercetin, curcumin, caffeic acid); their E2 cross-reference hits do **not** count toward hub scoring unless corroborated at E0/E1.
 > - **Evidence-type every edge** — prefer **E0** measured affinity (ChEMBL pChEMBL ≥ 6 / BindingDB); add an **E1 PICO literature leg** using the *compound* name as intervention ("Phellopterin", not "白芷"); optionally add **E3** SwissTargetPrediction/SEA for novel-target discovery.
 > - `step1_target_list_A.md` **gains columns:** `Organism, evidence_tier, source_id, assay_type, affinity, PAINS_flag`.
+
+> **🛡️ v11 mandatory controls (per §3, mechanisms 4–5):**
+> - **PAINS gate extends to E0 by assay type** (`promiscuity_filter.interference_demotion`) — a frequent-hitter's pChEMBL ≥ 6 from an **interference-prone assay (AlphaScreen, qHTS, fluorescence/FRET/luminescence)** or a **single assay** is demoted to **E3-predicted** pending ≥2 orthogonal assays. **You MUST capture and store `assay_type`** for every E0 edge — the v9 run stored none, which let gallic-acid AlphaScreen artefacts (FUT7, LMNA, KDM4E) pass as "measured". Do not treat polyphenol pChEMBL ≥ 6 as genuine affinity by default.
+> - **Route-feasibility filter** (`route_feasibility.py`) — using the Step-0 route, flag constituents that cannot be delivered (topical: MW > 500 or LogP outside ~1–3; oral: ≥2 Lipinski violations). A **delivery-implausible** compound (e.g. militarine MW 727, pachymic acid LogP 7.2) is flagged and **may not anchor a mechanism**. Add columns `route_feasible, route_violations`.
 
 - **Output files:**
   - `results/{COMPOUND}_{DISEASE}/step1_target_list_A.md` — **Combined "Potential Target List A"** — a structured markdown table with columns: Gene Symbol, UniProt ID, Source Compound(s), Confidence Score, Priority Tier. **High** (≥3 sources or multi-compound hit), **Medium** (2 sources), **Low** (single source only).
@@ -187,6 +222,8 @@ The pipeline's first **measured** evidence source: it injects patient/perturbati
 > - **Reconstruct pathogenic axes**, not a flat gene list — cell × inducer × cytokine × disease, each row with a PMID and a *direction in disease* (up/down).
 > - **Step-0 drug-type check** — is `{DISEASE}` immune- or hormone-driven? This decides whether the Open Targets funnel is trustworthy or literature must carry the core axes.
 > - `step2_disease_genes_B.md` **gains columns:** `genetic_flag, direction_in_disease, axis_membership`.
+
+> **🛡️ v11 — no silent zeros:** each data source must return a plausibility-checked non-empty result or be marked `FETCH_FAILED`, and **the report header may only advertise sources that actually contributed**. Apply a known-answer control per source (e.g. a well-studied disease like AD **must** return >0 GWAS loci; a `0` means the fetch is broken, not the biology — fix it or drop the claim). Session-9 advertised "GWAS EFO_0000274" while GWAS silently returned 0.
 
 > **🧬 v10 transcriptomics (conditional — run if data available):**
 > - **Derive a data-driven disease signature** — via `geo-database` fetch a `{DISEASE}` dataset (lesional vs control) → `pydeseq2` bulk differential expression (optionally `scanpy` / `scvi-tools` for single-cell cell-type resolution).
@@ -231,8 +268,12 @@ The pipeline's first **measured** evidence source: it injects patient/perturbati
 > - **Mandatory conflict log** — surface every directional conflict/ambiguity; a pass with zero conflicts is broken.
 > - `step4_moa_table.md` **gains columns:** `direction_source, L1, L2, L3, conflict_flag`.
 
+> **🛡️ v11 — enrichment integrity (`enrichment_integrity.py`):** run enrichment on the **scored hub set only** (never the raw intersection). Report **"N of M input genes"** using the de-duplicated input-gene count — **never print Reactome `found`** (it counts entities/isoforms and can exceed the input count). **Suppress non-specific umbrellas** (Immune System, Signaling by Interleukins, Cytokine Signaling, Disease, Metabolism…) from headlines. Enrichment convergence is **NOT** evidence of pathway engagement when the pathway's *defining* genes (e.g. IL4/IL13/IL4R/IL13RA1/STAT6/JAK for IL-4/IL-13 signalling) are absent from the hubs — say so explicitly. Add an enrichment **specificity control** (a random same-size gene set must not enrich comparably).
+
+> **🛡️ v11 — specific directional hypotheses (report-quality requirement):** modulation direction may **never** be left as a bare "undetermined". For each hub write one of: (a) the **measured** direction (E0 `action_type` / L1000) stated as fact; or, when unmeasured, (b) a **specific, falsifiable directional hypothesis** — the direction the target would need for therapy (**inhibition ↓** of an up-in-disease / pro-inflammatory target; **activation ↑** of a protective / down-in-disease one), **with a one-line biological rationale and the assay that resolves it** (e.g. "Hyp.: Inhibition ↓ — RELA/NF-κB is pro-inflammatory and up in lesional AD; refutable by an NF-κB reporter in IL-4/IL-13-stimulated keratinocytes reading TSLP/CCL17/CCL22"). This is the *hypothesis to test*, tagged `unmeasured`, **not** a claim the compound achieves it — so it stays honest and non-circular (it does not assert consistency, it prescribes the experiment). Where a target's role is genuinely unclear or off-pathway (e.g. γH2AX/DNA-damage), say so and flag it a likely promiscuity artefact rather than inventing a direction.
+
 > **🧬 v10 transcriptomics (conditional — run if signature available):**
-> - **Connectivity-map signature reversal** — test whether `{COMPOUND}`'s LINCS L1000 signature **reverses** the Step-2 disease signature (score −1 = full reversal → therapeutic; +1 = mimics disease). Report the score as a **measured** efficacy signal alongside the knowledge-based MOA.
+> - **Connectivity-map signature reversal** — test whether `{COMPOUND}`'s LINCS L1000 signature **reverses** the Step-2 disease signature (score −1 = full reversal → therapeutic; +1 = mimics disease). Report the score as a **measured** efficacy signal alongside the knowledge-based MOA. **🛡️ v11:** absent a measured reversal signature, therapeutic **efficacy is unproven** and the headline confidence is **capped** — state this at the top of the report, not only in limitations.
 > - **Report coverage honestly** — note L1000 reproducibility caveats and flag compounds with **no** available signature (common for TCM compounds); never infer a score where none exists.
 > - Writes `step4_signature_reversal.md` + `figures/step4_reversal_score.png`.
 
@@ -261,18 +302,30 @@ The pipeline's first **measured** evidence source: it injects patient/perturbati
 > **⚠️ v9 mandatory controls (per §3):**
 > - **Citation-grounding gate** — every `(claim, citation)` pair must have a PMID/DOI that resolves **AND** an abstract that supports the *specific* sentence; reject mismatches (year, authors, and topic must all match). No fabricated or misattributed citations.
 > - **Per-sentence confidence tier** — label each mechanistic claim Established / Novel-plausible / Hypothesis; tag novel claims *"no prior report; refutable by [assay]"* — never a manufactured citation.
-> - **Benchmark when a ground truth exists** — report recall + precision; always include a **C1/C2/C3** scope + honest-limitations section and a WFCMS self-eval appendix.
-> - **Additional outputs:** `step5_confidence_dashboard.md`, `step5_benchmark_scorecard.md`.
+> - Always include a **C1/C2/C3** scope + honest-limitations section and a WFCMS self-eval note. *(No version-vs-version benchmark — retired; effort goes to the validation plan.)*
+> - **Additional outputs:** `step5_confidence_dashboard.md`.
 > - **🧬 v10 (if signature available):** report the **signature-reversal score** as a headline validity metric, and use transcriptomic subgroups (e.g., Th2-high vs Th2-low) in the Responder Definition. If the track did not run, state so in the limitations section.
+
+> **🛡️ v11 controls — COMPUTE all of these; PRESENT them as plain science (see §5 *Report voice*), not as version-branded sections:**
+> - **Lineage self-audit** (`lineage_audit.py`) — recompute every headline number from source JSON; a table's row count must equal its stated count; **no gated gene may appear in a "scored" table**. Write the detail to an internal artifact `data_integrity_check.md`. **A run with any FAIL is not a valid deliverable.** In the report body this becomes only a one-line "all figures/tables reconciled to source data" note in *Limitations* — never a branded audit section.
+> - **Exposure-gated framing** — a responder/trial-population/systemic-comparator claim may appear **only** when the Step-0 route supports systemic activity. For a **topical/external** formula, reframe to skin-compartment delivery or omit — never a systemic trial population for a face mask.
+> - **Validation plan** (`validation_roadmap.build_roadmap`) — translate every unmeasured/hypothesis claim into the **specific, route-matched experiment** that resolves it, each with a **kill criterion**, decisive-first (e.g. LC-MS the extract → skin permeation → NF-κB reporter in IL-4/IL-13-stimulated keratinocytes reading TSLP/CCL17/CCL22 → L1000 reversal). In the report this is a plain **"Proposed validation experiments"** section.
+> - **Bottom-line assessment** (`validation_roadmap.lead_assessment`) — the report **opens and closes** with a plain-language verdict — *worth pursuing / promising-but-unproven / not yet* — plus the single cheapest decisive experiment and its kill criterion. Title it **"Bottom line"** / **"Overall assessment"**, never "Lead Assessment v11".
+> - **Report-quality gate (per §3, MANDATORY) — run LAST.** Before shipping, spawn the read-only **`report-qa` agent** (`.claude/agents/report-qa.md`) as the QA teammate — it routes to the matching reporting standard + GRADE + house rules and returns a **SHIP / FIX-FIRST / BLOCK** review. Apply its blocking fixes, re-invoke until **SHIP**, then persist the review as `report_qa_review.md`. A `block` verdict or any unresolved issue means the report is **not a valid deliverable**.
+> - **Internal artifacts (NOT report sections):** `step0_provenance.md`, `data_integrity_check.md`, `validation_plan.md`, `report_qa_review.md`.
 
 - **Output file:** `results/{COMPOUND}_{DISEASE}/step5_final_report.md`
   A final report with the following structure:
 
-#### Report Header
-- Pipeline & session identifier: **MOA-AG Research v10 · Session {N}** (per *Versioning Convention*)
+> **Report voice reminder (see §5):** write for a research reader. Plain scientific section titles only — **no** pipeline-version numbers, "mandatory control" language, module names, or benchmark section anywhere in the body. The version/session identifier appears **once**, in the methods footer.
+
+#### Report Header (compact)
 - Title: "Mechanism of Action Analysis: `{COMPOUND}` in `{DISEASE}`"
-- Compound structure(s) embedded: `![Compound Structures](figures/step1_compound_structures.png)`
-- Key compound properties table (MW, LogP, HBD, HBA, TPSA)
+- **Formula & route note (from Step 0):** one line stating the preparation, its authentic composition + herb count, and its **route** (e.g. "topical/external cosmetic preparation"). If Step 0 flagged a composition/route/indication problem, state it plainly here — it frames everything below.
+- Compound structure(s): `![Compound Structures](figures/step1_compound_structures.png)` + a key-properties table (MW, LogP, HBD, HBA, TPSA) with a **route-feasibility flag** on any delivery-implausible constituent.
+
+#### Bottom Line (opens the report — 2–4 sentences, plain language)
+Is this worth pursuing? Give the verdict (**worth pursuing / promising-but-unproven / not yet / no**), the single most decisive (cheapest) next experiment, and the one result that would kill the idea. No jargon, no version labels — a bench scientist should grasp it in ten seconds.
 
 #### Section 1: Scientific Hypothesis
 Clearly articulate how `{COMPOUND}` modulates the specific hub target(s), disrupts particular signaling pathways, and is thereby expected to improve specific phenotypes of `{DISEASE}`. Every claim must include APA-style in-text citations (Author, Year) referencing data from Steps 1–4. Embed figures and tables with proper captions:
@@ -304,10 +357,16 @@ Embed the full **MOA Overview Table** from Step 4 (`step4_moa_table.md`) into th
 
 The table must have a caption: `**Table N.** Mechanism of Action overview for {COMPOUND} in {DISEASE}.`
 
-#### Section 3: Responder Definition
-Based on the identified MOA, recommend which `{DISEASE}` patient subpopulation should be recruited in future clinical trials — defined by specific pathway abnormalities, genotypes, or biomarker expression profiles — to achieve precision medicine outcomes. All claims must be cited.
+#### Section 3: Application Context (exposure-gated)
+**Only when the Step-0 route supports systemic activity**, recommend which `{DISEASE}` patient subpopulation should be recruited in future trials — defined by pathway abnormalities, genotypes, or biomarker profiles. **For a topical/external formula this becomes a local-delivery / formulation-context section, NOT a systemic trial population** (a systemic responder definition for a face mask is a category error — see Step 0). State explicitly what is *not* claimed (e.g. no systemic target engagement). All claims cited.
 
-#### Section 4: Reference List
+#### Section 4: Proposed Validation Experiments
+The report's most useful output for a bench scientist: the route-matched experiments that would **confirm or kill** the hypothesis, ordered decisive-first, each with **method · readout · kill criterion** (from the validation plan). Convert every unmeasured directional hypothesis into its decisive assay (e.g. an NF-κB reporter in IL-4/IL-13-stimulated keratinocytes reading TSLP/CCL17/CCL22 settles the anti-inflammatory hubs in one plate). One week of the right bench work should settle what the report leaves as hypothesis.
+
+#### Section 5: Limitations & Scope
+C1/C2/C3 scope + honest limitations + a one-line data-integrity note ("all figures/tables reconciled to source data"). State transcriptomics/L1000 status; if modulation direction is unmeasured or no reversal signature exists, say **efficacy is unproven here**. Brief WFCMS self-eval (reliability · standardization · rationality). No version-vs-version benchmark.
+
+#### Section 6: Reference List
 A complete reference list in **APA 7th edition format** at the end of the report. Each entry must follow APA style:
 - **Journal articles:** Author, A. A., & Author, B. B. (Year). Title of article. *Journal Name*, *Volume*(Issue), Pages. https://doi.org/xxxxx
 - **Database entries:** Organization Name. (Year). Entry title (Accession: ID). *Database Name*. URL
@@ -316,9 +375,18 @@ A complete reference list in **APA 7th edition format** at the end of the report
   - National Center for Biotechnology Information. (2026). PubChem Compound Summary for CID 12345. *PubChem*. https://pubchem.ncbi.nlm.nih.gov/compound/12345
 - Only include sources from which data was actually retrieved in Steps 1–4 — no fabricated references
 
+#### Methods / Reproducibility footer (the ONLY place the pipeline version appears)
+A single compact block at the very end: pipeline version + session number, data sources with access dates, and the fact that all figures/tables were reconciled to source data. Keep it short — it is provenance metadata, not report content.
+
 ---
 
 ## 5. Rules and Constraints
+
+### Report voice — write for a research reader, not for the pipeline
+- The final report is a **scientific document**. Do **not** surface the machinery: **no** pipeline-version numbers (v9/v10/v11), **no** "mandatory control" / policy-callout language, **no** `moa_lib` module names, **no** internal audit branding, and **no** version-vs-version benchmark anywhere in the report body.
+- The **substance** of every gate MUST still appear — but as normal scientific content: the go/no-go conclusion → **Bottom line**; formula/route/plausibility → the **header note**; the experiments that resolve the unknowns → **Proposed validation experiments**; data-integrity + enrichment/promiscuity caveats → one line in **Limitations**.
+- The pipeline version + session appears **once**, in the **methods footer** — never in the title, cover, or repeated section labels. Readers judge the science; internal version labels read as noise and dent credibility.
+- Rule of thumb: if a sentence would only make sense to someone who has read CLAUDE.md, it does not belong in the report. Keep the gates rigorous internally; let the report read like it was written by a scientist.
 
 ### Execution Strategy — Minimize Bash, Maximize Scripts
 - **Do NOT use Bash for running Python code directly.** Instead, write a `.py` script to `scripts/`, then execute it with a single Bash call. This reduces Bash authorization prompts and saves context window.
@@ -378,6 +446,9 @@ A complete reference list in **APA 7th edition format** at the end of the report
 - **Activation:** Always run `conda activate moa` before executing any Python code
 - **Package installation:** Use `conda install -c conda-forge <pkg>` first; fall back to `pip install <pkg>` only if the package is not available on conda-forge
 - **Requirements file:** `requirements.txt` in project root lists all skill dependencies
+- **Transcriptomics Track deps (all installed):** `pydeseq2`, `GEOparse`, `scanpy`, `anndata`, `scvi-tools`, `scipy`, `pandas`. **DE default = `welch` engine** (pydeseq2 segfaults here → opt-in only). **L1000 reversal = key-free L1000CDS2 REST API** via `requests` — no `cmapPy`, no CLUE key.
+- **PDF report deps:** `reportlab` (default builder, CJK via `msyh.ttc`), `pymupdf` (verify/render), optional `typst` (pip; pandoc→typst two-step). No system LaTeX. **Build/debug details (load on demand):** `.claude/docs/pdf_generation.md`.
+- **Windows note:** run heavy stats in a script file with an `if __name__=='__main__':` guard (not `python -c`), and force single-thread (`n_cpus=1`) where a library uses joblib/loky — Windows process-spawn can crash otherwise.
 
 ---
 
@@ -389,26 +460,31 @@ All outputs are saved under `results/{COMPOUND}_{DISEASE}/` (single compound) or
 
 ```
 results/{COMPOUND}_{DISEASE}/          # or results/{DISEASE}/ for multi-compound
-├── step1_target_list_A.md             # Combined target list
+├── step0_provenance.md                # v11: formula composition / route / indication gate
+├── HALT_provenance.md                 # v11: written if the Step-0 gate returns HALT
+├── step1_target_list_A.md             # Combined target list (+ route_feasible, assay_type columns)
 ├── step1_per_compound/{compound}.md   # Per-compound lists (multi-compound only)
 ├── step2_disease_genes_B.md           # Disease pathogenic genes
 ├── step2_disease_signature.md         # v10: data-driven DE signature (when expression data available)
-├── step3_hub_targets.md               # Intersection hub targets
-├── step4_moa_summary.md               # MOA narrative
-├── step4_moa_table.md                 # MOA overview table
-├── step4_signature_reversal.md        # v10: connectivity-map reversal score (when signature available)
-├── step5_final_report.md              # Final deliverable report
-├── step5_confidence_dashboard.md      # v9: per-claim evidence tier + confidence
-├── step5_benchmark_scorecard.md       # v9: recall/precision vs ground truth (when available)
+├── step3_hub_targets.md               # Intersection hub targets (SCORED only; gated listed separately)
+├── step4_moa_summary.md               # MOA narrative (+ enrichment integrity)
+├── step4_moa_table.md                 # MOA overview table (specific directional hypotheses)
+├── step4_signature_reversal.md        # v10: L1000 connectivity-map reversal (when signature available)
+├── step5_final_report.md              # Final deliverable — plain scientific report (NO version branding)
+├── step5_confidence_dashboard.md      # per-claim evidence tier + confidence
+├── validation_plan.md                 # v11: route-matched falsifiable experiments (method/readout/kill)
+├── data_integrity_check.md            # v11: internal lineage self-audit (NOT a report section)
+├── report_qa_review.md                # v11.1: PRISMA/GRADE/AMSTAR-2 pre-ship QA (NOT a report section)
 ├── HALT_no_intersection.md            # If Step 3 finds no overlap OR overlap not significant (p>0.05 / z_c>−0.15)
-├── scripts/                           # Python scripts + v9 modules + v10 transcriptomics.py (promiscuity_filter, evidence_schema, specificity_controls, directionality, citation_grounding, benchmark_recall, transcriptomics)
-├── data/                              # Intermediate JSON data (step1–4_data.json)
+├── scripts/                           # Python scripts + import moa_lib (v9/v10/v11 modules)
+├── data/                              # Intermediate JSON data (step0–4_data.json)
 └── figures/                           # All PNG figures (step1–4)
 ```
+> Retired file: `step5_benchmark_scorecard.md` — no longer produced (benchmark removed).
 
 ### Rules
 - **Never use random, timestamped, or UUID-based file names** — always use the exact names above
-- **Reusable library modules live in the shared `moa_lib/` package at the project root** — the v9/v10 modules (`evidence_schema`, `promiscuity_filter`, `citation_grounding`, `specificity_controls`, `directionality`, `benchmark_recall`, `transcriptomics`). This is the **only** permitted top-level code location.
+- **Reusable library modules live in the shared `moa_lib/` package at the project root** — v9: `evidence_schema`, `promiscuity_filter`, `citation_grounding`, `specificity_controls`, `directionality`; v10: `transcriptomics`; v11: `provenance`, `route_feasibility`, `enrichment_integrity`, `lineage_audit`, `validation_roadmap`. (`benchmark_recall` remains for methods work but is not used in reports.) This is the **only** permitted top-level code location.
 - **Per-run driver / analysis scripts must be saved inside `results/{...}/scripts/`** (never elsewhere) and they `import moa_lib`. Each analysis run stays self-contained apart from the shared library it imports.
 - **All intermediate JSON data files must be saved inside `results/{...}/data/`** — keeps raw data separate from final markdown deliverables.
 - All report files are **markdown** with structured tables where applicable
