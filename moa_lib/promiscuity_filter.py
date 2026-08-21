@@ -124,3 +124,38 @@ def promiscuity_flags(compounds: dict, cap: int = 100) -> dict:
                 "action": "E2 hits require E0/E1 corroboration before hub scoring",
             }
     return out
+
+
+# ----------------------------------------------------------------------------- E0 assay scrutiny (v11)
+# Session-9 review: polyphenol pChEMBL >= 6 values (gallic acid -> FUT7 7.22, LMNA 6.55,
+# KDM4E 6.45, HSD17B10 7.3) are classic qHTS / AlphaScreen interference hits. The PAINS
+# gate only scrutinised E2; PAINS E0 slipped through and reintroduced promiscuity through
+# the back door. For a flagged frequent-hitter, an E0 hit from an interference-prone or
+# single assay is demoted to E3-predicted pending orthogonal confirmation.
+_INTERFERENCE_ASSAYS = {
+    "alphascreen", "alpha screen", "qhts", "fluorescence", "fluorescent", "fret", "htrf",
+    "luminescence", "luciferase", "beta-lactamase", "ampc", "firefly", "thermal shift",
+    "reporter gene", "redox", "aggregation",
+}
+
+
+def interference_demotion(assay_types, is_pains: bool, n_assays: int = 1) -> dict:
+    """Should a PAINS/frequent-hitter compound's E0 hit be trusted as measured?
+
+    assay_types: iterable of ChEMBL assay/standard_type or assay_description tokens.
+    Returns {demote: bool, effective_tier: 'E0'|'E3', reason}. Non-PAINS compounds are
+    never demoted here (their measured affinity stands).
+    """
+    types = [str(a).lower() for a in (assay_types or [])]
+    interference = [t for t in types if any(k in t for k in _INTERFERENCE_ASSAYS)]
+    if not is_pains:
+        return {"demote": False, "effective_tier": "E0", "reason": "non-PAINS measured affinity stands"}
+    if interference:
+        return {"demote": True, "effective_tier": "E3",
+                "reason": f"PAINS compound + interference-prone assay(s) {sorted(set(interference))} "
+                          f"— treat as predicted, not measured, pending orthogonal confirmation"}
+    if n_assays < 2:
+        return {"demote": True, "effective_tier": "E3",
+                "reason": "PAINS compound + single-assay support — needs >=2 orthogonal assays to count as E0"}
+    return {"demote": False, "effective_tier": "E0",
+            "reason": "PAINS but multi-assay, non-interference — measured affinity retained"}

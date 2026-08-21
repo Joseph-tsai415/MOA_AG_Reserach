@@ -100,9 +100,17 @@ neurokit2
 # Genomic Databases & APIs
 # ---------------------
 ensembl_rest
-GEOparse
+GEOparse                # v10 Transcriptomics Track: fetch GEO disease datasets
 google-cloud-bigquery
 gsutil
+# ---------------------
+# v10 Transcriptomics Track (moa_lib/transcriptomics.py) — all deps already above:
+#   GEO fetch: GEOparse ; DE: default engine 'welch' (numpy/scipy — robust; pydeseq2
+#   is opt-in and can segfault on Windows) ; single-cell: scanpy/anndata/scvi-tools.
+#   L1000 signature-reversal uses the KEY-FREE L1000CDS2 REST API
+#   (https://maayanlab.cloud/L1000CDS2/query, aggravate=false = reversers) via
+#   `requests` — NO cmapPy and NO CLUE.io API key required. Coverage caveat: many
+#   TCM natural products have no L1000 signature (reported honestly, not as absence-of-effect).
 
 # ---------------------
 # Machine Learning & Deep Learning
@@ -296,3 +304,23 @@ scikit-survival
 kilosort
 spykingcircus
 mountainsort5
+
+# ---------------------
+# Reporting / PDF generation  (Session 9: combine step1-5 outputs -> result.pdf)
+# ---------------------
+reportlab>=4.4        # zero-dependency PDF builder; the DEFAULT (handles CJK 七白散 via
+                      #   Microsoft YaHei, images, styled tables). No external engine needed.
+markdown>=3.10        # markdown -> HTML when an HTML intermediate is wanted
+# pymupdf  (already listed above) — render/verify PDF pages, page count, text extraction
+#
+# Optional higher-typography engine (NOT required; reportlab covers all needs):
+typst>=0.15           # pip-only Typst compiler (NO system LaTeX install). Pandoc is used as
+                      #   `pandoc report.md -s -t typst -V mainfont="Microsoft YaHei" -o x.typ`
+                      #   then `python -c "import typst; typst.compile('x.typ', root=<dir>)"`.
+                      #   The pip package has no CLI, so `pandoc --pdf-engine=typst` won't find
+                      #   it directly — use the two-step compile above. CJK works via mainfont.
+# pandoc                # system/conda tool (already present via Anaconda); md<->typst/html/etc.
+#                       #   install standalone with:  conda install -c conda-forge pandoc
+# Full-LaTeX alternative (heavier; only if LaTeX output is specifically required):
+# tectonic              # self-contained XeTeX engine; conda install -c conda-forge tectonic
+#                       #   pandoc --pdf-engine=tectonic ; CJK needs a ctex/xeCJK template.
