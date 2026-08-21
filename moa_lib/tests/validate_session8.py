@@ -10,6 +10,11 @@ session8 is a known-buggy fixture, so we know the right answers:
 Run:  python moa_lib/tests/validate_session8.py
 Needs network (UniProt / Crossref / NCBI). Unknown-organism (network miss)
 counts as neither pass nor fail for that entry.
+
+FIXTURE: the organism/promiscuity sections read a session8 artefact under
+`results/`, which is run output and NOT version controlled — a fresh clone will
+not have it. Those sections are then SKIPPED with a notice; the citation-grounding
+section needs no fixture and still runs. Re-run session8 to restore full coverage.
 """
 import json
 import os
@@ -45,8 +50,11 @@ def check(name, ok, detail=""):
 
 
 def main():
-    d = json.load(open(DATA, encoding="utf-8"))
-    compounds = d["compounds"]
+    # results/ is run output and not version controlled, so this fixture is absent
+    # in a fresh clone. Only section 2 needs it — sections 1 and 3 are self-contained.
+    compounds = None
+    if os.path.exists(DATA):
+        compounds = json.load(open(DATA, encoding="utf-8"))["compounds"]
 
     print("=" * 70)
     print("1) ORGANISM FILTER  (promiscuity_filter.is_human)")
@@ -75,17 +83,22 @@ def main():
     print("=" * 70)
     print("2) PAINS + PROMISCUITY  (promiscuity_filter.promiscuity_flags)")
     print("=" * 70)
-    flags = pf.promiscuity_flags(compounds, cap=100)
-    for name in sorted(compounds):
-        n = compounds[name].get("target_count", 0)
-        f = flags.get(name)
-        tag = (f"FLAGGED (n={n}, cap={f['over_promiscuity_cap']}, pains={f['pains']})"
-               if f else f"clean (n={n})")
-        print(f"    {name:22s} {tag}")
-    check("gallic acid flagged (promiscuity)",
-          "Gallic acid" in flags and flags["Gallic acid"]["over_promiscuity_cap"])
-    check("catechin flagged (PAINS/polyphenol)",
-          "Catechin" in flags and bool(flags["Catechin"]["pains"]))
+    if compounds is None:
+        print("    [SKIP] fixture not present (run output is not version controlled):")
+        print(f"           {os.path.relpath(DATA, ROOT)}")
+        print("           Re-run the session8 analysis to restore this section.")
+    else:
+        flags = pf.promiscuity_flags(compounds, cap=100)
+        for name in sorted(compounds):
+            n = compounds[name].get("target_count", 0)
+            f = flags.get(name)
+            tag = (f"FLAGGED (n={n}, cap={f['over_promiscuity_cap']}, pains={f['pains']})"
+                   if f else f"clean (n={n})")
+            print(f"    {name:22s} {tag}")
+        check("gallic acid flagged (promiscuity)",
+              "Gallic acid" in flags and flags["Gallic acid"]["over_promiscuity_cap"])
+        check("catechin flagged (PAINS/polyphenol)",
+              "Catechin" in flags and bool(flags["Catechin"]["pains"]))
 
     print()
     print("=" * 70)

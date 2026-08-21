@@ -12,4 +12,4 @@
 - **Always verify layout** by rendering pages to PNG with PyMuPDF (`fitz.get_pixmap`) and reading them back — catches clipping, overlap, and glyph tofu. Every figure needs its completeness essentials (colorbar where colour encodes data, category legend, un-clipped title).
 - **Optional typst** (pip `typst`>=0.15, no system LaTeX; the pip pkg has NO CLI so `pandoc --pdf-engine=typst` fails): two-step — `pandoc report.md -s -t typst -V mainfont="Microsoft YaHei" -o x.typ` (`-s` REQUIRED or "unknown variable: horizontalrule"), then `import typst; typst.compile('x.typ', output=..., root=<dir>)` (source file MUST be inside root; images resolve relative to root).
 
-**Reference builders:** `results/atopic_dermatitis_session9/scripts/make_pdf.py` · `reviews/*/scripts/make_pdf.py` · `reviews/synthesis_skin_to_gut/scripts/build.py`.
+**Reference builder:** `.claude/skills/report-pdf/scripts/build_report_pdf.py` — the single house-style builder, and the only one under version control. Do **not** hand-roll a per-run `make_pdf.py` (CLAUDE.md §5); the former per-run builders lived under `results/`/`reviews/`, which are run output and not version controlled.

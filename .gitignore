@@ -45,6 +45,10 @@ results/
 reviews/
 reviews_archive/
 
+# Session inputs — the questions/briefs that drive a run are session material too.
+# Git keeps the agent core only: CLAUDE.md, moa_lib/, .claude/ (skills + agents).
+research_questions.md
+
 # Transient artifacts, regenerated on every run:
 #   _pdf_preview/  PNG page renders from `build_report_pdf.py --verify`
 #   geo_tmp/       GEOparse SOFT/matrix download cache
