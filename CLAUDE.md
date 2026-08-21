@@ -22,6 +22,7 @@ Every run **records** both (pipeline version + session number) for traceability 
 
 | Version | Date | Summary |
 |---|---|---|
+| **v11.2** | 2026-07-31 | Extended the §3 evidence burden to **non-MOA `reviews/` deliverables** (literature syntheses, domain briefings) with a required `data/` + `scripts/` + `figures/` shape — see §8. Motivated by a HER2-breast-cancer CRA briefing that shipped as a bare `.md` + `.pdf`: unauditable and unreproducible. Retrofitting the gates immediately caught **two real defects that prose review had missed** — (1) a *fabricated attribution* (PMID 37770765 dressed with a wrong author, journal, volume and DOI; the reference list alone would have passed, only claim-level grounding caught it), and (2) a *transcription error* (a symbol-font label PDF encodes "4–8 weeks" with a Private-Use-Area dash; extraction read it as "48 weeks" and that number reached the report). Adds the PUA-normalisation rule for label PDFs and the figures-derived-from-`data/` rule. **No change to Steps 0–5.** |
 | **v11.1** | 2026-07-17 | Added a **Final-report quality gate** (§3): every deliverable is QA'd before shipping by a read-only **`report-qa` agent** (`.claude/agents/report-qa.md`) running as the orchestrator's QA teammate — it routes by report type to the matching EQUATOR standard (**PRISMA 2020 / ARRIVE 2.0 / STROBE / CONSORT / TRIPOD+AI / …**), grades certainty with **GRADE**, appraises conduct with **AMSTAR-2 / Cochrane RoB**, and overlays the project house rules (evidence tiers ≈ GRADE, specificity ≈ risk-of-bias, citation grounding, lineage audit). Fix-until-**SHIP** loop; writes `report_qa_review.md`. Detailed criteria + bundled official source checklists live in the **`reporting-standards` skill** (`.claude/skills/reporting-standards/`) — **no new Steps 0–5 methodology, and `CLAUDE.md` stays light**. |
 | **v11.0** | 2026-07-14 | Added **Step 0 — Provenance & Plausibility Gate** and four reliability upgrades after the Session-9 external review: (1) **provenance** — validate authentic formula composition, **route of administration**, and indication plausibility before Steps 1–5 (a topical cosmetic mask must not be modelled as a systemic drug); (2) **route-feasibility** drug-likeness *for the intended route* (skin permeation vs Lipinski) so delivery-implausible constituents can't anchor a mechanism; (3) **data-lineage integrity** — every headline number self-verifies, raw vs scored sets never share a container (fixes the 81-vs-14 leak); (4) **enrichment integrity** — non-specific-umbrella suppression, entity-vs-gene reconciliation, engagement-vs-spillover check (fixes "17 of 14" and the IL-4/IL-13 artefact). Extends the PAINS gate to **E0 by assay type** (AlphaScreen/qHTS interference), makes GWAS/L1000 **no-silent-zero**, and makes the deliverable a **route-matched Validation Roadmap + go/no-go Lead Assessment**. New modules: `provenance`, `route_feasibility`, `enrichment_integrity`, `lineage_audit`, `validation_roadmap`. |
 | **v10.0** | 2026-07-13 | Added the **Transcriptomics Track** (first measured-data layer): data-driven disease signature from patient RNA-seq (`geo-database` → `pydeseq2`; optional single-cell `scanpy`) that **augments** List B, plus **connectivity-map signature reversal** in Step 4 as a measured efficacy signal. Conditional — runs when a suitable expression dataset is available, else documented as absent. Builds on (does not replace) the v9 framework. |
@@ -312,6 +313,7 @@ The pipeline's first **measured** evidence source: it injects patient/perturbati
 > - **Validation plan** (`validation_roadmap.build_roadmap`) — translate every unmeasured/hypothesis claim into the **specific, route-matched experiment** that resolves it, each with a **kill criterion**, decisive-first (e.g. LC-MS the extract → skin permeation → NF-κB reporter in IL-4/IL-13-stimulated keratinocytes reading TSLP/CCL17/CCL22 → L1000 reversal). In the report this is a plain **"Proposed validation experiments"** section.
 > - **Bottom-line assessment** (`validation_roadmap.lead_assessment`) — the report **opens and closes** with a plain-language verdict — *worth pursuing / promising-but-unproven / not yet* — plus the single cheapest decisive experiment and its kill criterion. Title it **"Bottom line"** / **"Overall assessment"**, never "Lead Assessment v11".
 > - **Report-quality gate (per §3, MANDATORY) — run LAST.** Before shipping, spawn the read-only **`report-qa` agent** (`.claude/agents/report-qa.md`) as the QA teammate — it routes to the matching reporting standard + GRADE + house rules and returns a **SHIP / FIX-FIRST / BLOCK** review. Apply its blocking fixes, re-invoke until **SHIP**, then persist the review as `report_qa_review.md`. A `block` verdict or any unresolved issue means the report is **not a valid deliverable**.
+> - **PDF generation (final step — after SHIP).** Once `step5_final_report.md` has passed `report-qa` (**SHIP**), render the deliverable to a fixed-house-style PDF with the **`report-pdf` skill** (`.claude/skills/report-pdf/`): `python .claude/skills/report-pdf/scripts/build_report_pdf.py --run results/{...} --subtitle "{COMPOUND} in {DISEASE}" --verdict "{plain go/no-go}" --footer "{plain one-liner}" --cover-fig figures/step4_CT_network.png --out result.pdf --verify`. It assembles the main report + step appendices into `result.pdf`. **Report-voice applies to the PDF too** — no pipeline-version/session branding on the cover or footer (§5); the version stays in the report's methods footer. Do **not** hand-roll a per-run `make_pdf.py`. Always pass `--verify` and read back a `_pdf_preview/page_*.png` to catch glyph/tofu boxes.
 > - **Internal artifacts (NOT report sections):** `step0_provenance.md`, `data_integrity_check.md`, `validation_plan.md`, `report_qa_review.md`.
 
 - **Output file:** `results/{COMPOUND}_{DISEASE}/step5_final_report.md`
@@ -475,12 +477,42 @@ results/{COMPOUND}_{DISEASE}/          # or results/{DISEASE}/ for multi-compoun
 ├── validation_plan.md                 # v11: route-matched falsifiable experiments (method/readout/kill)
 ├── data_integrity_check.md            # v11: internal lineage self-audit (NOT a report section)
 ├── report_qa_review.md                # v11.1: PRISMA/GRADE/AMSTAR-2 pre-ship QA (NOT a report section)
+├── result.pdf                         # Final PDF (report-pdf skill; built after report-qa SHIP; NO version branding)
 ├── HALT_no_intersection.md            # If Step 3 finds no overlap OR overlap not significant (p>0.05 / z_c>−0.15)
 ├── scripts/                           # Python scripts + import moa_lib (v9/v10/v11 modules)
 ├── data/                              # Intermediate JSON data (step0–4_data.json)
 └── figures/                           # All PNG figures (step1–4)
 ```
 > Retired file: `step5_benchmark_scorecard.md` — no longer produced (benchmark removed).
+
+### `reviews/{topic}/` — non-MOA deliverables (literature syntheses, domain briefings)
+
+Not every deliverable is a 5-step MOA run, but **every deliverable carries the same evidence burden**. A `reviews/` output (literature synthesis, clinical-operations briefing, methods note) is governed by §3 exactly as a `results/` run is — only the *step* structure differs. Required shape:
+
+```
+reviews/{topic}/
+├── {topic}.md                  # the deliverable — plain scientific voice (§5)
+├── {topic}.pdf                 # via the report-pdf skill, --report mode
+├── data_integrity_check.md     # lineage self-audit output (internal artifact)
+├── report_qa_review.md         # report-qa verdict (internal artifact)
+├── scripts/                    # numbered, re-runnable, `import moa_lib`
+│   ├── 01_collect_sources.py   # every source fetched + persisted, failures recorded
+│   ├── 02_citation_grounding.py# moa_lib.citation_grounding — claim-level + reflist
+│   ├── 03_lineage_audit.py     # moa_lib.lineage_audit — numbers + counts + sources
+│   ├── 04_make_figures.py      # figures derived FROM data/, never hard-coded
+│   └── 05_build_pdf.py         # the exact build command, re-runnable
+├── data/                       # raw JSON/text of every source + gate outputs
+└── figures/                    # PNGs embedded in the deliverable
+```
+
+**A `.md` + `.pdf` with no `data/` and no `scripts/` is not a valid deliverable** — it cannot be audited or reproduced, which contradicts the claim that every number is traceable. Specifically:
+
+- **Retrieve and persist, don't remember.** Every source must be fetched by `01_collect_sources.py` and written to `data/`. Working from session scratch space, chat context, or recall is not retrieval. A fetch that fails is recorded as `FETCH_FAILED` — never silently dropped, and never advertised in the text as a source that contributed.
+- **Citation grounding is claim-level, not reference-level.** `02` must check that the source supports *the specific sentence* (entity + year), not merely that the PMID resolves. **This gate has already caught a fabricated attribution in this project** (a real PMID dressed with a wrong author, journal, volume and DOI) — reference-list-only checking would have passed it.
+- **Lineage audit re-verifies numbers against the stored artefact.** `03` re-checks every headline number verbatim against the source text in `data/`, and every stated count against the actually-rendered rows/items. **This gate has already caught a real transcription error** (a label PDF encoded "4–8 weeks" with a private-use-area dash glyph; extraction read it as "48 weeks"). Any FAIL means the deliverable is invalid until fixed.
+- **PDF-extraction hazard (record it, don't rediscover it):** symbol-font PDFs (drug labels) encode `≥ ≤ – >` in the Unicode Private Use Area. Normalise the PUA range **before** any numeric comparison, or extraction silently corrupts numbers.
+- **Figures are derived from `data/`**, and assert their values against the source before plotting. Apply the figure-completeness rules (legend for categories, colourbar for continuous colour, `bbox_inches='tight'`, glyph gate) and **read the PNG back** — CJK fonts lack `≤ ≥ ✔ ✘` and produce tofu boxes that text extraction cannot detect.
+- **`report-qa` runs last**, as for any deliverable; persist `report_qa_review.md`.
 
 ### Rules
 - **Never use random, timestamped, or UUID-based file names** — always use the exact names above
