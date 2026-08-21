@@ -66,6 +66,38 @@ The project env is Python (`moa`, 3.12). None of these has a single unified Pyth
 6. **Disease prior** — annotate each cargo miRNA with its HMDD disease links (and exosomal-miRNA evidence) as an E1 leg / novelty check.
 7. Hand List A to Step 3 **with tiers intact** so the specificity + enrichment-integrity gates run on it.
 
+## Setup — provision the reference flat file first (one-off)
+
+miRTarBase's human table (`data/hsa_MTI.csv`, **~322 MB**) is **not in git** — it
+exceeds GitHub's 100 MB per-file limit, so `.claude/skills/*/data/` is gitignored. A
+fresh clone has no `data/` directory. Provision it before the flat-file steps:
+
+```bash
+conda activate moa
+python .claude/skills/mirna-targets/scripts/download_reference_data.py --check   # status only
+python .claude/skills/mirna-targets/scripts/download_reference_data.py           # fetch if missing
+```
+
+`query_flatfiles.py mirtarbase` calls `ensure()` itself, so **omitting `--file` is the
+normal path** — it uses the cache and downloads on first use:
+
+```bash
+python scripts/query_flatfiles.py mirtarbase --mirna hsa-miR-21-5p
+```
+
+From your own script: `from download_reference_data import ensure; path = ensure("hsa_MTI.csv")`.
+
+Notes that matter when it fails:
+- miRTarBase serves over **legacy TLS** that modern OpenSSL rejects; the downloader
+  attaches a permissive SSL context for that host only. This is why a plain
+  `requests.get` to that URL fails.
+- The download **streams** to a `.part` file and is renamed in only after the byte
+  count matches `Content-Length`, so an interrupted run can never leave a truncated
+  file that looks cached. `--check` re-verifies size + header schema.
+- TargetScan and miRDB have **no scriptable download** (interactive/registration) —
+  those paths must still be passed explicitly. If miRTarBase is unreachable, fall back
+  to the ENCORI REST API (`encori_targets.py`), which needs no download.
+
 ## Bundled scripts (runnable) & reference
 
 Each script carries its own CHECKS (the `[WARN]`/`[FAIL]`/`[SCHEMA FAIL]` guards) so a broken input or a promiscuous target space fails loudly instead of silently producing a wrong List A. Run in the `moa` env; they use `if __name__ == "__main__"` guards (Windows-safe, §7).
@@ -74,7 +106,8 @@ Each script carries its own CHECKS (the `[WARN]`/`[FAIL]`/`[SCHEMA FAIL]` guards
 |---|---|---|
 | `scripts/normalize_mirnas.py` | normalise cargo miRNA names (`hsa-`, `-5p/-3p`), first step | flags arm-less names, malformed names, duplicates; non-zero exit on FAIL so a driver can gate |
 | `scripts/encori_targets.py` | validated/CLIP edges from the ENCORI Web API (Python-native, no download) | distinguishes "0 targets = coverage gap" from "fetch failed"; per-miRNA empty report |
-| `scripts/query_flatfiles.py` | query downloaded miRTarBase (validated) + TargetScan/miRDB (predicted) | asserts expected columns exist (schema drift → loud fail); miRTarBase strong-functional filter → E0/E1; TargetScan ∩ miRDB intersection as the anti-promiscuity filter |
+| `scripts/download_reference_data.py` | provision `data/hsa_MTI.csv` (~322 MB, gitignored); `--check` / `--force`; importable `ensure()` | legacy-TLS adapter for miRTarBase's host; streams to `.part` + atomic rename; rejects a truncated body against `Content-Length`; re-verifies size vs the recorded byte count **and** the header schema, so a partial download can't masquerade as cached |
+| `scripts/query_flatfiles.py` | query miRTarBase (validated) + TargetScan/miRDB (predicted); `--file` optional — auto-provisions the cache | asserts expected columns exist (schema drift → loud fail); miRTarBase strong-functional filter → E0/E1; TargetScan ∩ miRDB intersection as the anti-promiscuity filter |
 | `scripts/build_list_a.py` | assemble the tiered List A from edge CSVs | **specificity report**: target-space size, predicted-only fraction, multi-hit hub count — the make-or-break guard against a 40-miRNA blob |
 
 Reference: `references/databases_and_tiers.md` — versions, download schemas, score thresholds, the evidence-tier decision table, HMDD usage, and how the scripts connect into one pipeline.

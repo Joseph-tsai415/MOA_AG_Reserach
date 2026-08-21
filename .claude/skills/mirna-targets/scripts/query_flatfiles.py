@@ -13,17 +13,26 @@ The functions below each carry a CHECK that asserts the expected columns exist, 
 changed file layout fails loudly instead of silently returning wrong edges.
 
 Usage (examples):
-    python query_flatfiles.py mirtarbase --file hsa_MTI.csv --mirna hsa-miR-21-5p
+    python query_flatfiles.py mirtarbase --mirna hsa-miR-21-5p      # auto-provisions
+    python query_flatfiles.py mirtarbase --file /path/to/hsa_MTI.csv
     python query_flatfiles.py predicted  --targetscan TS.txt --mirdb miRDB.txt \
                                           --mirna hsa-miR-21-5p --mirdb-min 80
+
+--file is optional for `mirtarbase`: it defaults to the skill's cached copy and
+downloads it on first use (~322 MB, not in git — see download_reference_data.py).
+TargetScan/miRDB have no scriptable download and must still be passed explicitly.
 
 Dependencies: pandas (+ openpyxl if reading .xlsx)
 """
 import argparse
+import os
 import sys
 from typing import Optional
 
 import pandas as pd
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from download_reference_data import ensure  # noqa: E402
 
 try:  # Windows console is cp1252; keep the '∩'/'≥' glyphs readable
     sys.stdout.reconfigure(encoding="utf-8")
@@ -107,14 +116,19 @@ def predicted_intersection(ts: pd.DataFrame, mdb: pd.DataFrame,
 def main() -> int:
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
-    m = sub.add_parser("mirtarbase"); m.add_argument("--file", required=True); m.add_argument("--mirna")
+    m = sub.add_parser("mirtarbase")
+    m.add_argument("--file", help="path to hsa_MTI.csv; omit to use/fetch the skill's cache")
+    m.add_argument("--mirna")
     p = sub.add_parser("predicted")
     p.add_argument("--targetscan", required=True); p.add_argument("--mirdb", required=True)
     p.add_argument("--mirna"); p.add_argument("--mirdb-min", type=int, default=80)
     a = ap.parse_args()
 
     if a.cmd == "mirtarbase":
-        df = functional_strong(load_mirtarbase(a.file))
+        # No --file: use the skill's cache, provisioning it on first use rather
+        # than failing with a bare FileNotFoundError an agent cannot act on.
+        path = a.file or ensure("hsa_MTI.csv")
+        df = functional_strong(load_mirtarbase(path))
         if a.mirna:
             df = df[df["miRNA"].astype(str).str.lower() == a.mirna.lower()]
         print(f"miRTarBase strong-functional edges: {len(df)} "
