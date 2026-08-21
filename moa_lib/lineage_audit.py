@@ -14,8 +14,16 @@ valid deliverable.
     check_no_gated_leak(name, gated, table_genes)       -> Finding
     check_set_equesls(name, claimed, actual)            -> Finding
     audit(findings) / summarize                          -> (ok: bool, report)
+
+Text primitives an audit needs before it can compare anything (v11.2):
+
+    normalize_text(s, keep_lines=False)                 -> str
+    section(md, start, end=None)                        -> str
+    count_table_rows(block) / count_numbered(block)     -> int
 """
 from __future__ import annotations
+
+import re
 from dataclasses import dataclass, field
 
 
@@ -55,6 +63,66 @@ def check_set_equals(name: str, claimed, actual) -> Finding:
         only_claimed = sorted(a - b); only_actual = sorted(b - a)
         d = f"claimed-only {only_claimed[:6]}  actual-only {only_actual[:6]}"
     return Finding(f"set::{name}", ok, ("identical" if ok else "SET MISMATCH: " + d))
+
+
+# ---------------------------------------------------------------------------
+# Text primitives — a lineage audit is only as good as its string comparison.
+# ---------------------------------------------------------------------------
+
+# Symbol-font PDFs (drug labels, many regulatory documents) encode >= <= - > and
+# bullets in the Unicode Private Use Area rather than as real characters. Raw
+# extraction therefore turns "4-8 weeks" into "48 weeks" — silently, with no
+# error and nothing a text diff can see. This is not hypothetical: exactly that
+# corruption put "48 weeks" into a shipped briefing before the audit caught it.
+# ALWAYS map these before any numeric comparison against label-derived text.
+PUA_MAP = {
+    "": "-",   "": ">=",  "": "<=",
+    "": ">",   "": "<",   "": "*",
+    "": "->",  "": " ",   "": "+",
+}
+
+
+def normalize_text(s: str, keep_lines: bool = False) -> str:
+    """Normalise text for substring search before comparing numbers or claims.
+
+    Handles, in order: PUA symbol glyphs (see PUA_MAP), the middle-dot decimal
+    that Lancet-family journals typeset instead of a period (1·33, not 1.33 —
+    without this every Lancet number false-FAILs), dash variants, and the
+    full-width punctuation that CJK typesetting introduces.
+
+    keep_lines=True preserves newlines, which is REQUIRED for any line-based
+    (table/list) parsing — a blanket \\s+ collapse silently destroys row
+    structure and every table count then comes back as 0 or 1.
+    """
+    s = s or ""
+    for k, v in PUA_MAP.items():
+        s = s.replace(k, v)
+    s = s.replace("·", ".").replace("–", "-").replace("—", "-").replace("−", "-")
+    s = s.replace("／", "/").replace("％", "%").replace("，", ",")
+    return re.sub(r"[ \t]+", " ", s) if keep_lines else re.sub(r"\s+", " ", s)
+
+
+def section(md: str, start: str, end: str | None = None) -> str:
+    """Slice the markdown between two literal anchors (end exclusive, optional)."""
+    i = md.find(start)
+    if i < 0:
+        return ""
+    j = md.find(end, i + len(start)) if end else -1
+    return md[i: j if j > 0 else len(md)]
+
+
+def count_table_rows(block: str) -> int:
+    """Count rendered markdown table body rows (header and separator excluded)."""
+    rows = [
+        ln for ln in block.splitlines()
+        if ln.strip().startswith("|") and not re.match(r"^\|[\s\-:|]+\|$", ln.strip())
+    ]
+    return max(0, len(rows) - 1)
+
+
+def count_numbered(block: str) -> int:
+    """Count rendered `1.` `2.` ... list items — the 'stated N items' counterpart."""
+    return len(re.findall(r"^\d+\.\s", block, re.M))
 
 
 def audit(findings: list) -> tuple:

@@ -21,6 +21,17 @@ lineage, enrichment integrity, and a falsifiable output):
 
 v10 measured-data track (conditional — real expression data only):
     transcriptomics      — GEO -> pydeseq2 DE signature + L1000CDS2 reversal
+
+v11.2 — the text primitives the gates depend on live here, NOT in per-run scripts.
+Run folders (results/, reviews/) are regenerated output and are not version
+controlled, so any helper left in one is lost. Two that had to be recovered:
+    lineage_audit.normalize_text        — Private-Use-Area glyph mapping. Symbol-font
+                                          label PDFs encode "4-8 weeks" with a PUA dash;
+                                          raw extraction reads "48 weeks" silently.
+    citation_grounding.check_reference_entry
+                                        — the rendered reference entry vs its resolved
+                                          metadata; catches a real PMID dressed with a
+                                          fabricated author/journal/volume/DOI.
 """
 from . import (  # noqa: F401
     benchmark_recall,
