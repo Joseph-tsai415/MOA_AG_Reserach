@@ -23,11 +23,28 @@ agent:
 python:
   conda_env: moa                 # CLAUDE.md §7: `conda activate moa`
   package_paths: [moa_lib]
+  # This list is the container's STARTUP gate (harness/preflight.py, run before
+  # `exec "$@"` in entrypoint.sh) -- not decorative. It deliberately mirrors the
+  # pre-refactor entrypoint.sh import-check set (rdkit, matplotlib, networkx,
+  # numpy, scipy, pandas, requests, reportlab, pymupdf, matplotlib_venn) plus the
+  # three moa_lib gate modules, which are a genuine net addition the old check
+  # lacked. Trimming this to "just the new modules" silently drops startup
+  # verification for numpy/scipy/pandas -- the packages most likely to be
+  # findable-but-broken (bad wheel, missing shared lib) -- and lets a broken
+  # image pass preflight only to die mid-run instead of at startup.
   import_check:
     - moa_lib.citation_grounding
     - moa_lib.provenance
     - moa_lib.specificity_controls
     - rdkit
+    - matplotlib
+    - networkx
+    - numpy
+    - scipy
+    - pandas
+    - requests
+    - reportlab
+    - pymupdf
     - matplotlib_venn
   requirements:
     base:  runner-requirements/base.txt
