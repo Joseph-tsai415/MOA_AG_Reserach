@@ -56,9 +56,13 @@ inputs:
   # string_list means: ONE comma-separated value on the CLI, a list internally. The
   # delimiter is fixed at ',' by the harness, not per-core -- worker.py joins on it and
   # doc/API_PROTOCOL.md documents it, so it is a contract, not a preference.
+  #
+  # Do NOT add a "notes"/"context" input here for free-text requester context --
+  # the harness already owns that via its own --extra flag, which the prompt
+  # template renders as {extra}. A per-core input duplicating it would be
+  # accepted on the CLI but never wired to anything the agent sees.
   - {name: compounds, type: string_list, required: true,  cli: --compounds}
   - {name: disease,   type: string,      required: true,  cli: --disease}
-  - {name: notes,     type: string,      required: false, cli: --notes}
 
 run_dir:
   template: "{compounds.first|slug}_{disease|slug}"
