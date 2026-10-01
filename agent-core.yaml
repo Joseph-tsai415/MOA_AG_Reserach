@@ -36,6 +36,9 @@ python:
   default_profile: omics
 
 inputs:
+  # string_list means: ONE comma-separated value on the CLI, a list internally. The
+  # delimiter is fixed at ',' by the harness, not per-core -- worker.py joins on it and
+  # doc/API_PROTOCOL.md documents it, so it is a contract, not a preference.
   - {name: compounds, type: string_list, required: true,  cli: --compounds}
   - {name: disease,   type: string,      required: true,  cli: --disease}
   - {name: notes,     type: string,      required: false, cli: --notes}
@@ -47,6 +50,9 @@ run_dir:
   probe_base: probe
 
 prompt:
+  # prompt.probe is deliberately omitted: the probe prompt is an infrastructure
+  # check owned by the harness (harness/probe_prompt.md), not pipeline science. A
+  # core overrides it only if it needs a different probe; MOA does not.
   run: .agent-core/prompt_run.md
 
 progress:
@@ -54,10 +60,16 @@ progress:
     - {artifact: step0_provenance.md,           phase: provenance,    percent: 5,   label: "Provenance & plausibility gate"}
     - {artifact: step1_target_list_A.md,        phase: targets,       percent: 20,  label: "Compound targets (List A)"}
     - {artifact: step2_disease_genes_B.md,      phase: disease_genes, percent: 35,  label: "Disease genes (List B)"}
+    # Conditional (CLAUDE.md §3 Transcriptomics Track): run only when a suitable
+    # expression dataset exists; never simulated. The schema has no "optional:"
+    # field, and none is needed -- progress is highest-artifact-seen, so a milestone
+    # that is never written simply never fires. Its absence is normal, not a stall.
     - {artifact: step2_disease_signature.md,    phase: disease_genes, percent: 38,  label: "Data-driven disease signature"}
     - {artifact: step3_hub_targets.md,          phase: intersection,  percent: 45,  label: "Hub targets locked"}
     - {artifact: step4_moa_summary.md,          phase: mechanism,     percent: 60,  label: "Mechanism narrative"}
     - {artifact: step4_moa_table.md,            phase: mechanism,     percent: 65,  label: "MOA overview table"}
+    # Conditional, same as step2_disease_signature.md above: L1000 signature reversal
+    # only runs when a disease signature was derived. Absence is normal, not a stall.
     - {artifact: step4_signature_reversal.md,   phase: mechanism,     percent: 68,  label: "L1000 signature reversal"}
     - {artifact: validation_plan.md,            phase: report,        percent: 75,  label: "Validation roadmap"}
     - {artifact: step5_final_report.md,         phase: report,        percent: 80,  label: "Final report drafted"}
@@ -71,7 +83,17 @@ outcome:
   # scientific outcome and must never be reported as an error.
   halts:
     HALT_provenance.md: provenance_gate
+    # Inherited verbatim from the pre-refactor classify.py, and pinned by a golden
+    # test. CLAUDE.md §3 actually defines two Step-3 halt triggers -- no intersection
+    # at all, and an overlap indistinguishable from random -- and this single reason
+    # tag covers both. Imprecise, but changing it is a behaviour change, not a
+    # refactor; worth revisiting once the refactor is complete.
     HALT_no_intersection.md: no_specificity
+  # success_requires AND deliverable are BOTH required -- they are conjunctive, not
+  # alternatives. Together they reproduce the pinned behaviour: report + PDF ->
+  # completed; report alone -> failed/incomplete_pdf. Note "deliverable" here means
+  # "a required output artifact", which is narrower than CLAUDE.md §8's human sense of
+  # the word (there, the REPORT is the deliverable and the PDF is its rendering).
   success_requires: [step5_final_report.md]
   deliverable: result.pdf
   headline:
@@ -100,6 +122,9 @@ image:
     - validation/
     - docs/
     - .claude/settings.local.json
+    # Single-level glob by design: exactly one skill has a data/ dir today
+    # (mirna-targets, re-included below), so this is moot as written. Would need
+    # widening (e.g. "**/data/") if another skill ever nests a cache deeper.
     - ".claude/skills/*/data/"
     - "!.claude/skills/mirna-targets/data/"
   env:
