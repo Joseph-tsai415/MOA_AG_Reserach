@@ -965,7 +965,38 @@ under the repo root — so verify rather than assume.)
 
 Run: `cd /d/Dev/projects/agent-harness && conda run -n moa python -m pytest tests/ -v`
 
-Expected: **same pass count as Task 5 Step 3.** Any failure here is a move error, not a behaviour change — the modules were not edited.
+Expected: **the same pass count Task 5 reached.** Any failure here is a move error,
+not a behaviour change — the modules were not edited.
+
+> **Where that baseline actually lives.** In `MOA_AG_Reserach` the count is reproducible
+> only from the **working tree**, not from the branch: `tests/` and `app/run_once.py` are
+> tracked there, but `app/`'s other eleven modules are not, so a fresh clone of
+> `feat/agent-harness-extraction` cannot even collect the suite. That is deliberate —
+> `MOA_AG_Reserach` is public and the harness does not belong in it. **This repo is where
+> it gets fixed**, because here the whole package is committed.
+
+- [ ] **Step 4b: Prove the suite runs from a CLEAN CLONE**
+
+The property the old branch could not have, and the one that actually matters: a
+checkout containing nothing but what git tracks must collect and pass.
+
+```bash
+cd /d/Dev/projects/agent-harness
+git add -A && git commit -q -m "wip: pre-clone check"     # reworded in Step 7
+TMP=$(mktemp -d)
+git clone -q . "$TMP/clone"
+cd "$TMP/clone" && conda run -n moa python -m pytest tests/ -v; cd -
+rm -rf "$TMP"
+```
+
+Expected: the same pass count, from tracked files alone. A collection error means a
+module the suite imports is still untracked — find it with `git status --short` in the
+source repo, add it, and repeat.
+
+> Also from the Task 5 review: three tests transitively read `app.config.settings` via
+> `apply_kind_defaults`. Every field has a safe literal default so there is no flake
+> today — but if this suite runs inside a container with `HARNESS_*` (or legacy
+> `MOA_*`) exported, those values win. Remember it when Task 17 runs tests in the image.
 
 - [ ] **Step 5: Add `.gitignore` and `.dockerignore`**
 
