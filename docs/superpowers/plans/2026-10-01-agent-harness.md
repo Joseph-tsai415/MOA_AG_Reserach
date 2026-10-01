@@ -934,8 +934,18 @@ mv runner/Dockerfile runner/docker-compose.yml runner/entrypoint.sh \
 mv runner/requirements          container/requirements
 mv runner/container/conda container/conda
 mv runner/container/conda-init.sh container/conda-init.sh
-mv watch_run.ps1 container/watch_run.ps1 2>/dev/null || true
+mv runner/watch_run.ps1 container/watch_run.ps1
 rmdir runner/container runner/app 2>/dev/null || true
+
+# Before deleting runner/, prove it holds nothing but empty dirs. `rm -rf` after a
+# chain of `mv ... || true` is how a file disappears without a trace: a mistyped
+# source path becomes a silent no-op, and the delete then removes the original.
+# (That is exactly how watch_run.ps1 was lost on the first run of this task.)
+leftover=$(find runner -type f 2>/dev/null)
+if [ -n "$leftover" ]; then
+    echo "FATAL: runner/ still holds files that were never moved:"; echo "$leftover"
+    exit 1
+fi
 rm -rf runner
 ```
 
