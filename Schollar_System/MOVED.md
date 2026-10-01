@@ -20,9 +20,11 @@ What this repository provides to the harness:
 | `runner-requirements/*.txt` | the scientific dependency tiers |
 
 **Provenance of the copy at `agent-harness/cores/moa-ag/`:** copied from this
-repository at commit `7a00c02` (branch `feat/agent-harness-extraction`) on
-2026-10-01. Re-syncing means repeating the `tar` copy described in the harness
-repo's extraction task and updating this line and the matching stamp at
-`agent-harness/manifests/moa-ag.source`.
+repository's **working tree** (branch `feat/agent-harness-extraction`, nearest
+commit `a67a24d`) on 2026-10-01 — the tree was dirty at copy time (including an
+uncommitted `CLAUDE.md`, part of the core), so the copy is approximate and not
+reproducible from any single commit. Re-syncing means repeating the `tar` copy
+described in the harness repo's extraction task and updating this line and the
+matching stamp at `agent-harness/manifests/moa-ag.source`.
 
 Frozen on 2026-10-01.
