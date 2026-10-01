@@ -3128,6 +3128,68 @@ Then rename every remaining `MOA_` env read in the file to `HARNESS_`, per the
 spec table. **Do not** rename `MOA_RUN_DIR` or `MOA_CJK_FONT` — they are not read
 by `config.py`; they are payload-declared and set from the manifest.
 
+- [ ] **Step 1b: Make `container/run_local.ps1` core-aware (it is non-functional as it stands)**
+
+`run_local.ps1` is the documented fastest way to validate the pipeline natively and
+measure cost + wall-clock, so leaving it broken is not acceptable. The Task 6 move
+broke it in two ways, and only the first is a path tweak:
+
+1. `$RepoRoot = (Resolve-Path (Join-Path $RunnerDir '..\..')).Path` assumed the script
+   sat two levels below the root (`Schollar_System/runner/`). `container/` is one level
+   below, so it now resolves to the **parent of the repo**.
+2. More fundamentally, **`$RepoRoot` no longer means what the script needs.** It used to
+   be the one directory holding `CLAUDE.md`, `moa_lib/` and `results/`. Those are now
+   the **core's**, not the harness's. So the script needs two separate roots, and it
+   needs to know which core to run.
+
+Rewrite the resolution block as:
+
+```powershell
+param(
+    [string]$Core = $(if ($env:HARNESS_CORE) { $env:HARNESS_CORE } else { 'slot' }),
+    # ... existing params unchanged ...
+)
+
+$ContainerDir = $PSScriptRoot
+$HarnessRoot  = (Resolve-Path (Join-Path $ContainerDir '..')).Path
+$CoreRoot     = Join-Path (Join-Path $HarnessRoot 'cores') $Core
+
+if (-not (Test-Path $CoreRoot)) {
+    Fail "No core at $CoreRoot. Drop one into cores/$Core/, or pass -Core <name>."
+}
+
+# The manifest names the instructions file; fall back to CLAUDE.md for the message only.
+if (-not (Test-Path (Join-Path $CoreRoot 'agent-core.yaml'))) {
+    Fail "No agent-core.yaml in $CoreRoot -- every core must declare itself. See doc/ADDING_A_CORE.md."
+}
+
+$env:HARNESS_CORE_ROOT    = $CoreRoot
+$env:HARNESS_RESULTS_ROOT = Join-Path $CoreRoot 'results'
+$env:HARNESS_CORE         = $Core
+# Harness first, then the core, so `import harness` always wins and the core's own
+# packages (moa_lib) still resolve. Mirrors the container's PYTHONPATH.
+$env:PYTHONPATH           = "$HarnessRoot;$CoreRoot"
+```
+
+Then fix the invocation: `Push-Location $RunnerDir` followed by `python -m app.run_once`
+worked because `app/` was nested under `runner/`. Now `harness/` is a **sibling** of
+`container/`, so push to `$HarnessRoot` and call `python -m harness.run_once`.
+
+Finally, update the script's header comment: it currently describes the old two-level
+layout and the `app.` vs `service.` module split, both of which are gone.
+
+**Verify** (no API spend — `--dry-run` makes no Claude call):
+
+```powershell
+cd D:\Dev\projectsgent-harness\container
+.un_local.ps1 -Core moa-ag -Compounds "Curcumin" -Disease "Atopic Dermatitis" -DryRun
+```
+
+Expected: it resolves the core, prints the run directory and the rendered prompt, and
+exits without calling Claude. A failure naming a path above the repo root means the
+`$HarnessRoot` math is still wrong.
+
+
 - [ ] **Step 2: Sweep the rest of the harness and container**
 
 ```bash
