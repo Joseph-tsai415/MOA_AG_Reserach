@@ -22,6 +22,20 @@
 - **`MOA_AG_Reserach/CLAUDE.md` is not modified by this plan.** If a task appears to require editing it, the task is wrong.
 - **Two repos are in play.** `OLD` = `D:\Dev\projects\MOA_AG_Reserach`, `NEW` = `D:\Dev\projects\agent-harness`. `OLD/Schollar_System/` is kept frozen as a rollback path and is never deleted by this plan.
 - **Commit after every task.** Conventional-commit prefixes (`test:`, `feat:`, `refactor:`, `chore:`, `docs:`).
+- **NO git submodule, and nothing is pushed to `MOA_AG_Reserach`.** Cores are plain
+  drop-in directories under `cores/`. The MOA core is **copied** to `cores/moa-ag/`
+  and is **git-ignored** in the harness repo. Rationale: the harness must not depend
+  on one payload's repository to build or to test itself, and coupling the build to
+  a remote submodule ref was the only thing in this plan that required pushing to a
+  shared default branch. A submodule remains available later, purely as a
+  reproducibility option, and is documented as such — it is not on the critical path.
+- **The harness's own committed test suite must pass with `hello-core` alone.** Tests
+  that need the MOA core **skip** when `cores/moa-ag/` is absent (it is not
+  committed). A fresh clone must therefore be green without any payload present —
+  that property is the genericity claim, stated as a test rather than a README
+  sentence.
+- **`agent-harness` is a PRIVATE GitHub repo.** It carries AWS infra templates,
+  deploy scripts and API config. Scan for committed secrets before the first push.
 
 ---
 
@@ -77,7 +91,7 @@
 
 **Interfaces:**
 - Consumes: nothing (first task)
-- Produces: a `tests/` package importable as `from app import naming`; the `run_dir_factory` fixture reused by Tasks 2 and 3 with signature `run_dir_factory(*filenames: str, **contents: str) -> Path`
+- Produces: a `tests/` package importable as `from app import naming`; the `run_dir_factory` fixture reused by Tasks 2 and 3 with signature `run_dir_factory(*filenames: str, files: dict[str, str] | None = None) -> Path` — positional args become placeholder files, `files` maps filename → exact content. Both accept nested paths (`"figures/step1.png"`). **Note:** an earlier draft of this line said `**contents: str`; that was wrong, and every call site in Tasks 2 and 3 uses `files={...}`.
 
 - [ ] **Step 1: Create the pytest config and conftest**
 
@@ -111,9 +125,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 @pytest.fixture
 def run_dir_factory(tmp_path):
-    """Build a fake run directory. Positional args are empty-ish files;
-    keyword args are files with content (key = filename with dots as
-    underscores is NOT done — pass real names via the `files` dict instead)."""
+    """Build a fake run directory.
+
+    Positional args are filenames created with placeholder content, for tests that
+    only care whether a file exists. `files` maps filename -> exact content, for
+    tests that read it back. Both accept nested paths ("figures/step1.png").
+    """
 
     def _make(*filenames: str, files: dict[str, str] | None = None) -> Path:
         d = tmp_path / "run"
@@ -1069,29 +1086,63 @@ See `doc/ADDING_A_CORE.md`.
 }
 ```
 
-- [ ] **Step 3: Add MOA-AG as a submodule core**
+- [ ] **Step 3: Drop the MOA core in as a plain directory (no submodule)**
+
+The harness must not need a payload's repository to build or test itself, so a
+core is just a directory. `cores/moa-ag/` is **git-ignored** — it is a local
+working copy, not harness content.
 
 ```bash
 cd /d/Dev/projects/agent-harness
-git submodule add https://github.com/Joseph-tsai415/MOA_AG_Reserach.git cores/moa-ag
-git submodule update --init --recursive
+mkdir -p cores/moa-ag
+# Copy the agent core only. Exclude run output, the frozen harness copy, and
+# git metadata: .dockerignore and the manifest's image.exclude both guard this
+# too, but there is no reason to copy 10 GB of results to delete it later.
+rsync -a --delete \
+  --exclude '.git/' --exclude 'results/' --exclude 'reviews/' \
+  --exclude 'reviews_archive/' --exclude 'Schollar_System/' \
+  --exclude 'docs/' --exclude 'validation/' --exclude '.superpowers/' \
+  --exclude '__pycache__/' \
+  /d/Dev/projects/MOA_AG_Reserach/ cores/moa-ag/
 ls cores/moa-ag/CLAUDE.md cores/moa-ag/moa_lib
 ```
 
-Expected: both exist. Note that `cores/moa-ag/.claude/skills/mirna-targets/data/hsa_MTI.csv`
-is **absent** — it is not in git (322 MB, over GitHub's limit). Task 16's
-`core-stage` provisions it. Confirm the absence now so the Task 16 behaviour is
-understood as designed, not as a bug:
+If `rsync` is unavailable in Git Bash, use
+`cp -r /d/Dev/projects/MOA_AG_Reserach/. cores/moa-ag/` followed by
+`rm -rf cores/moa-ag/{.git,results,reviews,reviews_archive,Schollar_System,docs,validation,.superpowers}`.
+
+Then record whether the 322 MB reference file came along — it is **not** in git,
+so whether it is present depends on whether the download script has ever been run
+on this machine. Both outcomes are valid and Task 16 handles each:
 
 ```bash
-ls cores/moa-ag/.claude/skills/mirna-targets/data/ 2>&1 | head
+ls -la cores/moa-ag/.claude/skills/mirna-targets/data/ 2>&1 | head
 ```
 
-- [ ] **Step 4: Commit both repos**
+Note the result in your report: **present** → Task 16's build uses it with zero
+network; **absent** → Task 16's `core-stage` provisions it (the path this plan
+exists to make work).
+
+- [ ] **Step 4: Ignore the core copies, keep `hello-core` committed**
+
+Append to `NEW/.gitignore` (replacing the `cores/slot/*` block from Task 6):
+
+```gitignore
+# Cores are drop-in payloads, not harness content: a local working copy of
+# someone's agent core does not belong in this repo's history. hello-core is the
+# exception — it IS harness content: the reference core the test suite runs on.
+cores/*
+!cores/slot/
+!cores/hello-core/
+cores/slot/*
+!cores/slot/README.md
+```
+
+- [ ] **Step 5: Commit both repos (no push to MOA_AG_Reserach)**
 
 ```bash
 cd /d/Dev/projects/agent-harness
-git add -A && git commit -m "chore: add harness CLAUDE.md and pin MOA-AG as cores/moa-ag
+git add -A && git commit -m "chore: add harness CLAUDE.md; cores are git-ignored drop-ins
 
 Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 
@@ -1101,6 +1152,9 @@ git commit -m "docs: freeze Schollar_System; the harness now lives in its own re
 
 Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 ```
+
+**Do not push `MOA_AG_Reserach`.** Its commits stay on the local branch
+`feat/agent-harness-extraction` for the operator to review and merge.
 
 ---
 
@@ -1592,7 +1646,54 @@ def load_manifest(core_root: Path, *, sidecar_dir: Path | None = None) -> Manife
     )
 ```
 
-- [ ] **Step 4: Add `pyyaml` to the platform requirements**
+- [ ] **Step 4: Add the MOA-core skip guard used by every later shim**
+
+`cores/moa-ag/` is a git-ignored drop-in, so a fresh clone does not have it. The
+golden-test shims in Tasks 10–14 load its manifest at module import, which would
+**error** rather than skip. This helper makes them skip cleanly, which is what
+keeps the harness's committed suite green with `hello-core` alone.
+
+`NEW/tests/_core.py`:
+
+```python
+"""Locating the MOA agent core, for the golden tests that pin its behaviour.
+
+The MOA core is a drop-in working copy, deliberately not committed to the harness
+repo (see .gitignore). The harness's own suite must therefore be green without it:
+tests that pin MOA behaviour SKIP, they do not error. That property is the
+genericity claim expressed as a test rather than a README sentence.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+MOA_CORE = Path(__file__).resolve().parents[1] / "cores" / "moa-ag"
+
+
+def moa_manifest_or_skip():
+    """Load the MOA core's manifest, or skip the whole module if it is absent."""
+    if not (MOA_CORE / "agent-core.yaml").is_file():
+        pytest.skip(
+            f"cores/moa-ag not present at {MOA_CORE} — it is a git-ignored drop-in. "
+            f"Copy the agent core in to run the MOA golden tests.",
+            allow_module_level=True,
+        )
+    from harness.manifest import load_manifest
+
+    return load_manifest(MOA_CORE)
+```
+
+For `from _core import ...` to resolve, `tests/` must be on `sys.path`. Add this to
+`tests/conftest.py` next to the existing repo-root insert:
+
+```python
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # so tests can import _core
+```
+
+- [ ] **Step 5: Add `pyyaml` to the platform requirements**
 
 `NEW/container/requirements/platform.txt` — create it with **only** service-layer deps:
 
@@ -1790,7 +1891,7 @@ artifacts:
   exclude: [_pdf_preview/, geo_tmp/, tool-results/, "**/__pycache__/**"]
 ```
 
-- [ ] **Step 4: Verify the real manifest loads**
+- [ ] **Step 4: Commit in the science repo (locally — do NOT push)**
 
 ```bash
 cd /d/Dev/projects/MOA_AG_Reserach
@@ -1802,23 +1903,40 @@ CLAUDE.md is deliberately unchanged: MOA_RUN_DIR and MOA_CJK_FONT stay
 MOA-owned names, declared in the manifest.
 
 Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
+```
 
+These three paths are the only things this plan adds to the science repo. They
+stay on the local branch for the operator to review.
+
+- [ ] **Step 5: Re-sync the core copy and verify the real manifest loads**
+
+`cores/moa-ag/` is a copy, so the new files must be synced into it:
+
+```bash
 cd /d/Dev/projects/agent-harness
-git -C cores/moa-ag fetch origin && git -C cores/moa-ag checkout master && git -C cores/moa-ag pull
+cp /d/Dev/projects/MOA_AG_Reserach/agent-core.yaml cores/moa-ag/
+mkdir -p cores/moa-ag/.agent-core cores/moa-ag/runner-requirements
+cp /d/Dev/projects/MOA_AG_Reserach/.agent-core/*.md cores/moa-ag/.agent-core/
+cp /d/Dev/projects/MOA_AG_Reserach/runner-requirements/*.txt cores/moa-ag/runner-requirements/
 conda run -n moa python -m pytest tests/test_manifest.py::test_moa_manifest_loads -v
 ```
 
 Expected: **PASS** (no longer skipped).
 
-- [ ] **Step 5: Commit the submodule bump**
+- [ ] **Step 6: Commit the harness side**
 
 ```bash
 cd /d/Dev/projects/agent-harness
-git add cores/moa-ag container/requirements
-git commit -m "chore: bump cores/moa-ag to the commit that adds its manifest
+git add container/requirements
+git commit -m "chore: scientific dependency tiers now belong to the core, not the harness
+
+container/requirements/ keeps platform.txt only. The science stack is declared by
+the core's manifest (python.requirements) and resolved at build time.
 
 Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 ```
+
+`cores/moa-ag/` produces no diff — it is git-ignored.
 
 ---
 
@@ -2068,9 +2186,9 @@ expected value**:
 from pathlib import Path
 
 from harness import naming as _naming
-from harness.manifest import load_manifest
+from _core import moa_manifest_or_skip
 
-_MOA = load_manifest(Path(__file__).resolve().parents[1] / "cores" / "moa-ag")
+_MOA = moa_manifest_or_skip()
 
 
 class naming:  # noqa: N801 — keeps the original test bodies readable
@@ -2197,9 +2315,9 @@ Replace `from app import progress as P` in `tests/test_progress_golden.py` with:
 from pathlib import Path
 
 from harness import progress as _P
-from harness.manifest import load_manifest
+from _core import moa_manifest_or_skip
 
-_MOA = load_manifest(Path(__file__).resolve().parents[1] / "cores" / "moa-ag")
+_MOA = moa_manifest_or_skip()
 
 
 class P:  # noqa: N801 — keeps the original test bodies readable
@@ -2340,9 +2458,9 @@ Replace `from app import classify as C` in `tests/test_classify_golden.py` with:
 from pathlib import Path
 
 from harness import classify as _C
-from harness.manifest import load_manifest
+from _core import moa_manifest_or_skip
 
-_MOA = load_manifest(Path(__file__).resolve().parents[1] / "cores" / "moa-ag")
+_MOA = moa_manifest_or_skip()
 
 
 class C:  # noqa: N801 — keeps the original test bodies readable
@@ -2581,8 +2699,9 @@ from pathlib import Path
 from harness import prompt as _PR
 from harness.manifest import load_manifest
 
-_CORE = Path(__file__).resolve().parents[1] / "cores" / "moa-ag"
-_MOA = load_manifest(_CORE)
+from _core import MOA_CORE as _CORE, moa_manifest_or_skip
+
+_MOA = moa_manifest_or_skip()
 
 
 class PR:  # noqa: N801 — keeps the original test bodies readable
@@ -2693,10 +2812,10 @@ Replace `from app.run_once import build_parser` in `tests/test_cli_golden.py` wi
 ```python
 from pathlib import Path
 
-from harness.manifest import load_manifest
+from _core import moa_manifest_or_skip
 from harness.run_once import build_parser as _build_parser
 
-_MOA = load_manifest(Path(__file__).resolve().parents[1] / "cores" / "moa-ag")
+_MOA = moa_manifest_or_skip()
 
 
 def build_parser():
@@ -3156,6 +3275,51 @@ def verify(required_paths: list[str]) -> None:
     log(f"verified {len(required_paths)} required path(s)")
 
 
+def emit_build_inputs(doc: dict) -> None:
+    """Resolve the manifest's build-time choices to fixed paths the Dockerfile
+    can consume. A Dockerfile cannot read YAML, and the requirements path and
+    conda env name are both manifest-declared — so this stage resolves them and
+    writes them where the builder stage can COPY --from here.
+
+    Two deliberate asymmetries:
+      * An ABSENT `python.requirements` is legitimate (a core may have no Python
+        dependencies at all — see cores/hello-core) and yields an empty file.
+      * A DECLARED `python.requirements` that lacks the requested profile is an
+        operator error and fails the build loudly. Installing nothing silently
+        because of a typo'd profile name is exactly the failure this project's
+        'no optional variants' rule exists to prevent.
+    """
+    python = doc.get("python") or {}
+    profile = os.environ.get("PROFILE", "").strip()
+    requirements = python.get("requirements") or {}
+
+    out = Path("/stage/requirements.txt")
+    if not requirements:
+        out.write_text("# this core declares no Python dependencies\n", encoding="utf-8")
+        log("no python.requirements declared — core adds no dependencies")
+    elif profile not in requirements:
+        die(f"PROFILE={profile!r} is not among this core's declared requirement "
+            f"profiles ({', '.join(sorted(requirements))}). Build with one of those, "
+            f"or add the profile to the manifest.")
+    else:
+        source = CORE / requirements[profile]
+        if not source.is_file():
+            die(f"python.requirements[{profile}] points at {requirements[profile]!r}, "
+                f"which does not exist in the core ({source})")
+        # Copy the whole directory: a tier file may use `-r base.txt`, which only
+        # resolves if its siblings come along.
+        shutil.copytree(source.parent, Path("/stage/requirements.d"), dirs_exist_ok=True)
+        out.write_text(f"-r /stage/requirements.d/{source.name}\n", encoding="utf-8")
+        log(f"requirements: profile {profile} -> {requirements[profile]}")
+
+    # An absent conda_env gets a fixed fallback name rather than no env at all, so
+    # the image shape is invariant and `conda activate` always works.
+    conda_env = (python.get("conda_env") or "harness").strip()
+    Path("/stage/build.env").write_text(f"CONDA_ENV={conda_env}\n", encoding="utf-8")
+    log(f"conda env: {conda_env}"
+        + ("" if python.get("conda_env") else " (default — core declared none)"))
+
+
 def main() -> None:
     doc = load()
     name = (doc.get("core") or {}).get("name", "?")
@@ -3165,6 +3329,7 @@ def main() -> None:
     prune(list(image.get("exclude") or []))
     provision(list(image.get("reference_data") or []))
     verify(list(image.get("required_paths") or []))
+    emit_build_inputs(doc)
 
     total = sum(p.stat().st_size for p in CORE.rglob("*") if p.is_file())
     log(f"core staged: {total / 1e6:.0f} MB")
@@ -3177,18 +3342,24 @@ if __name__ == "__main__":
 - [ ] **Step 2: Rewrite the Dockerfile's core section**
 
 Replace the `--- the agent core ---` block and the mount-point block. Keep the
-`builder` stage, the font/Node/apt layers and the trailing `CLAUDE_CODE_VERSION`
-block **exactly as they are** — only the lines below change.
+font/Node/apt layers and the trailing `CLAUDE_CODE_VERSION` block **exactly as they
+are** — only the lines below change.
 
-Add after the `builder` stage:
+**`core-stage` must come FIRST, before `builder`.** The builder installs the
+payload's dependency tier, and after Task 9 that tier lives inside the core at a
+*manifest-declared* path which a Dockerfile cannot read. `core-stage` resolves it
+(and the conda env name) to fixed paths the builder then copies from. Add this as
+the first stage, above `builder`:
 
 ```dockerfile
 # ---------------------------------------------------------------------------
-# Stage 1b — stage the agent core: prune per manifest, provision reference data
+# Stage 1 — stage the agent core: prune per manifest, provision reference data,
+# and resolve the manifest's build-time choices (requirements tier, conda env
+# name) to fixed paths, because a Dockerfile cannot read YAML.
 #
 # HARNESS_CORE selects which core goes into the image:
-#   cores/slot/   the copy-paste slot (default)
-#   cores/<name>/ a submodule-pinned core, e.g. HARNESS_CORE=moa-ag
+#   slot     the copy-paste slot (default) -> cores/slot/
+#   <name>   a drop-in core, e.g. HARNESS_CORE=moa-ag -> cores/moa-ag/
 # ---------------------------------------------------------------------------
 FROM python:${PYTHON_VERSION}-slim-bookworm AS core-stage
 
@@ -3206,9 +3377,61 @@ COPY manifests/ /stage/manifests/
 COPY container/stage_core.py /stage/stage_core.py
 
 # The cache mount means an upstream 504 on retry does not re-download 322 MB.
-ENV HARNESS_CORE=${HARNESS_CORE}
+ARG PROFILE
+ENV HARNESS_CORE=${HARNESS_CORE} PROFILE=${PROFILE}
 RUN --mount=type=cache,target=/stage/cache,sharing=locked \
     python /stage/stage_core.py /stage/core
+```
+
+Then modify the **`builder`** stage to consume what `core-stage` resolved. Replace
+its `COPY Schollar_System/runner/requirements/ /tmp/requirements/` line and the
+`uv pip install` that follows with:
+
+```dockerfile
+# The harness's own deps are a fixed file; the payload's are whatever its manifest
+# declared, already resolved by core-stage (a Dockerfile cannot read YAML).
+COPY container/requirements/platform.txt /tmp/platform.txt
+COPY --from=core-stage /stage/requirements.txt /tmp/core-requirements.txt
+COPY --from=core-stage /stage/requirements.d/ /stage/requirements.d/
+COPY --from=core-stage /stage/build.env /tmp/build.env
+
+# The env is always created at a FIXED path, and the manifest's declared name
+# becomes a symlink alias. That keeps every ENV line static (Dockerfile ENV cannot
+# be computed) while `conda activate <declared-name>` still works — which matters,
+# because a core's own instructions tell the agent to run exactly that. MOA's
+# CLAUDE.md §7 says `conda activate moa`; hello-core declares nothing and gets the
+# `harness` default. Both resolve to the same real env.
+RUN . /tmp/build.env \
+    && micromamba create -y -p /opt/conda/envs/core -c conda-forge \
+        --override-channels python=3.12 pip \
+    && micromamba clean -a -y \
+    && uv pip install --no-cache --python /opt/conda/envs/core/bin/python \
+        -r /tmp/platform.txt -r /tmp/core-requirements.txt \
+    && find /opt/conda -name '__pycache__' -type d -prune -exec rm -rf {} + \
+    && ln -sfn /opt/conda/envs/core "/opt/conda/envs/${CONDA_ENV}" \
+    && printf 'CONDA_ENV=%s\n' "${CONDA_ENV}" > /opt/conda/env-name
+```
+
+Delete the hard-coded `micromamba create -y -p /opt/conda/envs/moa` from the
+earlier layer and the `python -c "import rdkit, chembl_webresource_client, …"`
+verification — both name MOA specifics. The import check is now the core's
+`python.import_check`, enforced by `harness.preflight` at start-up.
+
+In the `runtime` stage, replace every literal `envs/moa` with `envs/core` — so all
+the `ENV` lines (`PATH`, `CONDA_PREFIX`) stay static. The symlink and
+`/opt/conda/env-name` come along with the `COPY --from=builder /opt/conda` that
+already exists. Set `CONDA_DEFAULT_ENV` from the alias in `conda-init.sh` (already
+sourced by every bash via `BASH_ENV`) by reading `/opt/conda/env-name`, so
+`conda env list` and the shell prompt show the name the core declared.
+
+Verify both spellings resolve to the same interpreter — add to the existing
+post-conda `RUN bash -c '…'` check:
+
+```dockerfile
+    && bash -c '. /opt/conda/env-name \
+        && conda run -n core --no-capture-output python -c "import sys; print(sys.prefix)" \
+        && conda run -n "${CONDA_ENV}" --no-capture-output python -c "import sys; print(sys.prefix)" \
+        && conda activate "${CONDA_ENV}" && command -v python'
 ```
 
 Then in the `runtime` stage, replace the agent-core COPY block with:
