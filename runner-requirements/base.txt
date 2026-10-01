@@ -1,0 +1,76 @@
+# ---------------------------------------------------------------------------
+# LEAN profile — what an MOA run actually imports.
+#
+# Derived by scanning moa_lib/ and every historical results/*/scripts/*.py:
+#   matplotlib 109 · requests 46 · reportlab 27 · rdkit 23 · numpy 23
+#   networkx 20 · matplotlib_venn 9 · pandas 5 · scipy 3 · statsmodels 1
+#
+# The repo-root requirements.txt covers all 176 skills (~303 packages, many GB).
+# Do NOT install it here — the pipeline uses a small, stable subset.
+# ---------------------------------------------------------------------------
+
+# Core scientific stack
+requests>=2.31
+numpy>=1.26
+scipy>=1.11
+pandas>=2.1
+matplotlib>=3.8
+matplotlib-venn>=0.11
+networkx>=3.2
+statsmodels>=0.14
+seaborn>=0.13
+
+# Cheminformatics — Step 1 structures, drug-likeness, PAINS gate
+rdkit>=2023.9
+pubchempy>=1.0.4
+
+# Report / PDF — report-pdf skill (reportlab builder, pymupdf --verify)
+reportlab>=4.0
+pymupdf>=1.24
+
+# Data fetch / parsing
+GEOparse>=2.0
+lxml>=5.0
+beautifulsoup4>=4.12
+openpyxl>=3.1
+
+# --- Skill imports the pipeline's §6 skills document (added 2026-09-17) ------
+# Found by scanning .claude/skills/*/SKILL.md install lines + scripts/ imports
+# and importing each in the verify1 image — all of these were MISSING, so a run
+# that reached for them burned turns on ImportError / pip install.
+chembl_webresource_client>=0.10   # chembl-database (Step 1)
+biopython>=1.83                   # geo-database, pubmed (Entrez)
+bioservices>=1.11                 # uniprot / kegg helpers
+reactome2py>=3.0                  # reactome-database (Step 4)
+ensembl_rest>=0.2                 # ensembl-database
+datamol>=0.12                     # datamol skill; medchem depends on it
+medchem>=2.0                      # PAINS / structural alerts (Step 1 gate)
+scikit-learn>=1.4
+gseapy>=1.1                       # enrichment cross-check (Step 4)
+adjustText>=1.1                   # non-overlapping figure labels
+upsetplot>=0.9                    # Step 3 intersections beyond 3 sets (sdist, pure python)
+plotly>=5.20                      # Step 4 Sankey (CLAUDE.md lists plotly)
+kaleido==0.2.1                    # plotly -> PNG. PINNED: kaleido>=1.0 needs a system Chrome
+h5py>=3.10
+pyyaml>=6.0
+psutil>=5.9
+tqdm>=4.66
+
+# Docking (Step 4 L3 — in-silico, decoy-controlled)
+vina>=1.2.5
+meeko>=0.5
+gemmi>=0.6                        # meeko 0.8 imports it but does not declare it
+openbabel-wheel>=3.1
+py3Dmol>=2.0
+
+# Artifact formats a run may be asked to produce or read (DOCX/XLSX/PPTX/PDF/MD)
+python-docx>=1.1
+python-pptx>=0.6
+pypdf>=4.0
+markitdown>=0.1
+typst>=0.11                       # optional pandoc->typst PDF path (CLAUDE.md §7)
+
+# Runner service
+claude-agent-sdk>=0.1.0
+boto3>=1.34
+python-dotenv>=1.0

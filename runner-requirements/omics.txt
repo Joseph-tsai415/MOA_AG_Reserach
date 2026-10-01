@@ -1,0 +1,15 @@
+# ---------------------------------------------------------------------------
+# OMICS profile — Transcriptomics Track (CLAUDE.md §3), bulk + basic single-cell.
+# THE DEFAULT IMAGE PROFILE (push-image.sh). CLAUDE.md §7 states these are
+# installed; shipping an image without them made that statement false in prod.
+#
+# Adds ~600 MB. The default DE engine is 'welch' (numpy/scipy,
+# already in base.txt), so LEAN can still run the Transcriptomics Track for
+# bulk DE — this profile adds the pydeseq2 engine and single-cell handling.
+# ---------------------------------------------------------------------------
+
+-r base.txt
+
+pydeseq2>=0.4
+anndata>=0.10
+scanpy>=1.10

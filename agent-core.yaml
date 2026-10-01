@@ -1,0 +1,109 @@
+# How the agent-harness runs this repository as an agent core.
+# See: https://github.com/Joseph-tsai415/agent-harness → doc/ADDING_A_CORE.md
+#
+# This file does NOT change the science. CLAUDE.md remains the operating manual
+# and is not edited; MOA_RUN_DIR and MOA_CJK_FONT stay MOA-owned names, declared
+# below, precisely so that stays true.
+schema: 1
+
+core:
+  name: moa-ag
+  display_name: "MOA-AG network pharmacology pipeline"
+  version: v11.2
+
+agent:
+  instructions: CLAUDE.md
+  setting_sources: [project]     # without this, CLAUDE.md is invisible to the agent
+  run_dir_env: MOA_RUN_DIR       # CLAUDE.md §2 reads this name
+  defaults:
+    model: claude-opus-5
+    max_turns: 400
+    permission_mode: bypassPermissions
+
+python:
+  conda_env: moa                 # CLAUDE.md §7: `conda activate moa`
+  package_paths: [moa_lib]
+  import_check:
+    - moa_lib.citation_grounding
+    - moa_lib.provenance
+    - moa_lib.specificity_controls
+    - rdkit
+    - matplotlib_venn
+  requirements:
+    base:  runner-requirements/base.txt
+    omics: runner-requirements/omics.txt
+    full:  runner-requirements/full.txt
+  default_profile: omics
+
+inputs:
+  - {name: compounds, type: string_list, required: true,  cli: --compounds}
+  - {name: disease,   type: string,      required: true,  cli: --disease}
+  - {name: notes,     type: string,      required: false, cli: --notes}
+
+run_dir:
+  template: "{compounds.first|slug}_{disease|slug}"
+  fallback: "{disease|slug}"
+  session_suffix: "_session{n}"
+  probe_base: probe
+
+prompt:
+  run: .agent-core/prompt_run.md
+
+progress:
+  milestones:
+    - {artifact: step0_provenance.md,           phase: provenance,    percent: 5,   label: "Provenance & plausibility gate"}
+    - {artifact: step1_target_list_A.md,        phase: targets,       percent: 20,  label: "Compound targets (List A)"}
+    - {artifact: step2_disease_genes_B.md,      phase: disease_genes, percent: 35,  label: "Disease genes (List B)"}
+    - {artifact: step2_disease_signature.md,    phase: disease_genes, percent: 38,  label: "Data-driven disease signature"}
+    - {artifact: step3_hub_targets.md,          phase: intersection,  percent: 45,  label: "Hub targets locked"}
+    - {artifact: step4_moa_summary.md,          phase: mechanism,     percent: 60,  label: "Mechanism narrative"}
+    - {artifact: step4_moa_table.md,            phase: mechanism,     percent: 65,  label: "MOA overview table"}
+    - {artifact: step4_signature_reversal.md,   phase: mechanism,     percent: 68,  label: "L1000 signature reversal"}
+    - {artifact: validation_plan.md,            phase: report,        percent: 75,  label: "Validation roadmap"}
+    - {artifact: step5_final_report.md,         phase: report,        percent: 80,  label: "Final report drafted"}
+    - {artifact: step5_confidence_dashboard.md, phase: report,        percent: 83,  label: "Confidence dashboard"}
+    - {artifact: data_integrity_check.md,       phase: report,        percent: 86,  label: "Lineage self-audit"}
+    - {artifact: report_qa_review.md,           phase: qa_review,     percent: 90,  label: "Report QA review"}
+    - {artifact: result.pdf,                    phase: pdf,           percent: 100, label: "PDF deliverable"}
+
+outcome:
+  # A halt is the pipeline refusing to manufacture a result. It is a VALID
+  # scientific outcome and must never be reported as an error.
+  halts:
+    HALT_provenance.md: provenance_gate
+    HALT_no_intersection.md: no_specificity
+  success_requires: [step5_final_report.md]
+  deliverable: result.pdf
+  headline:
+    artifact: step5_final_report.md
+    section: "Bottom Line"
+  qa:
+    artifact: report_qa_review.md
+    verdicts: [SHIP, FIX-FIRST, BLOCK]
+    blocking: [BLOCK]
+
+image:
+  required_paths: [CLAUDE.md, moa_lib, .claude/skills]
+  reference_data:
+    # ~322 MB, over GitHub's per-file limit, so NOT in git. The upstream host
+    # 504s often enough that downloading at RUN time is a liability — the image
+    # carries it, and a build without it fails rather than degrading silently.
+    - path: .claude/skills/mirna-targets/data/hsa_MTI.csv
+      min_bytes: 100000000
+      required: true
+      provision: "python .claude/skills/mirna-targets/scripts/download_reference_data.py"
+  exclude:
+    - results/
+    - reviews/
+    - reviews_archive/
+    - Schollar_System/
+    - validation/
+    - docs/
+    - .claude/settings.local.json
+    - ".claude/skills/*/data/"
+    - "!.claude/skills/mirna-targets/data/"
+  env:
+    MOA_CJK_FONT: /usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc
+
+artifacts:
+  exclude: [_pdf_preview/, geo_tmp/, tool-results/, "**/__pycache__/**"]

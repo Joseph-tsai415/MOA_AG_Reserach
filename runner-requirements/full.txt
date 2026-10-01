@@ -1,0 +1,13 @@
+# ---------------------------------------------------------------------------
+# FULL profile — omics + probabilistic single-cell + GRN inference.
+# Build with:  --build-arg PROFILE=full
+#
+# WARNING: scvi-tools pulls PyTorch (~2.5 GB). Image goes from ~2 GB to ~5 GB.
+# Only build this if a run genuinely needs scvi-tools or arboreto; otherwise
+# the pull cost on every EC2 scale-out is not worth it.
+# ---------------------------------------------------------------------------
+
+-r omics.txt
+
+scvi-tools>=1.1
+arboreto>=0.1.6
