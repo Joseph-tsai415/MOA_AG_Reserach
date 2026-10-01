@@ -3182,7 +3182,8 @@ layout and the `app.` vs `service.` module split, both of which are gone.
 
 ```powershell
 cd D:\Dev\projectsgent-harness\container
-.un_local.ps1 -Core moa-ag -Compounds "Curcumin" -Disease "Atopic Dermatitis" -DryRun
+.
+un_local.ps1 -Core moa-ag -Compounds "Curcumin" -Disease "Atopic Dermatitis" -DryRun
 ```
 
 Expected: it resolves the core, prints the run directory and the rendered prompt, and
@@ -4288,8 +4289,16 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 
 **Files:**
 - Create: `NEW/doc/ADDING_A_CORE.md`
-- Modify: `NEW/README.md`, `NEW/doc/{ARCHITECTURE.md,API_PROTOCOL.md,EVENT_SCHEMA.md,VERIFY_CONTRACT.md,DEPLOY_EC2.md,LOCAL_SETUP.md}`
-- Create: `NEW/container/README.md` (replaces the old `runner/README.md`)
+- Create: `NEW/container/README.md` — already restored during Task 6; this task corrects
+  its *content* (see Step 3)
+- Modify: **whatever Step 3's sweep reports.** Do not work from a hand-written list.
+
+> Three drafts of this task enumerated the files to fix and all three were incomplete —
+> the last one named nine and the sweep found nineteen, including `doc/scripts/*.py`
+> doc-generators, `infra/scripts/push-image.sh`, `frontend-amplify/` and the root
+> `deploy.sh`. The grep is authoritative; a list written from memory is not. Run Step 3
+> first, fix every hit it reports, then re-run it until it is empty apart from the
+> exemptions named there.
 
 **Interfaces:**
 - Consumes: everything
@@ -4315,11 +4324,28 @@ the Task 6 layout, and every `MOA_*` / `runner/` / `Schollar_System` reference.
 
 ```bash
 cd /d/Dev/projects/agent-harness
-grep -rn "Schollar_System\|runner/app\|service\.run_once\|moa-runner\|MOA_BUILD_PROFILE" \
-    README.md doc/ container/ --include=*.md --include=*.sh --include=*.yml
+# Repo-wide, NOT scoped to a few directories: Task 6 found stale references in
+# infra/README.md and doc/reference/, both of which an earlier, narrower version
+# of this sweep missed entirely.
+grep -rnE 'Schollar_System|runner/app|runner/tests|service\.run_once|app\.run_once|moa-runner|MOA_BUILD_PROFILE' \
+    . --include=*.md --include=*.sh --include=*.yml --include=*.ps1 --include=*.py \
+    | grep -v '/\.git/' | grep -v node_modules | grep -v '/cores/'
 ```
 
-Expected: no output when done. Each hit is a stale reference to fix.
+Expected: eventually no output, **except** hits in `container/Dockerfile`, `container/docker-compose.yml` and `container/run_local.ps1` — those three are rewritten by Tasks 15 and 16, so leave them and note them. Every other hit is this task's to fix. `cores/` is excluded because a core is someone else's payload — its documentation is not ours to rewrite.
+excluded because a core is someone else's payload — its documentation is not ours
+to rewrite.
+
+Two content problems in `container/README.md` to fix beyond path strings, both
+caused by the extraction rather than by sloppy writing:
+
+- It tells the reader to check for a repo-root `requirements.txt`, and for
+  `CLAUDE.md` and `.claude/skills/`. **None of those exist in this repo any more** —
+  they are core-layer artifacts. Rewrite those checks in terms of `cores/<name>/`
+  and point at `doc/ADDING_A_CORE.md`. A path-only sweep leaves that prose
+  confidently wrong.
+- Its native quick-start calls `run_local.ps1` the fastest way to validate a run.
+  That script only becomes core-aware in Task 15; make the text match its real state.
 
 - [ ] **Step 4: Verify every documented command actually runs**
 
