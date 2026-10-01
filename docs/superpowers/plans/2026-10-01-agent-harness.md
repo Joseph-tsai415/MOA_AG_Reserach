@@ -874,23 +874,31 @@ mkdir -p /d/Dev/projects/agent-harness
 cd /d/Dev/projects/agent-harness
 git init -b main
 # --- Copy with secrets EXCLUDED, rather than copy-then-delete -------------
-# `runner/.env` holds a LIVE ANTHROPIC API KEY (verified by scan). Never copy a
-# secret and delete it afterwards: that leaves it on disk in a second location,
-# and one forgotten `git add -A` in between is unrecoverable. Exclude at source.
-rsync -a \
-  --exclude '.git/' \
-  --exclude '.env' --exclude '.env.*' --include '.env.example' \
-  --exclude '__pycache__/' \
-  --exclude '.aws-sam/' \
-  --exclude 'node_modules/' \
-  --exclude '.expo/' \
-  --exclude 'dist/' \
-  --exclude 'frontend-dist.zip' \
-  /d/Dev/projects/MOA_AG_Reserach/Schollar_System/ .
+# `runner/.env` holds a LIVE ANTHROPIC API KEY (verified by scan), and
+# `frontend-ref/.env` is a second one. NEVER copy a secret and delete it
+# afterwards: that leaves the credential on disk in a second location, and one
+# forgotten `git add -A` in that window is unrecoverable once pushed. Excluding
+# at source means the secret is never written to the new tree at all.
+#
+# tar, NOT rsync: rsync is NOT installed in this Git Bash environment (verified
+# by probing it). GNU tar 1.35 is. tar's --exclude matches any path component, so
+# a bare '.env' catches both .env files, and it does NOT glob-match '.env.example'
+# (also verified by test).
+tar -cf - \
+  --exclude='.git' \
+  --exclude='.env' \
+  --exclude='__pycache__' \
+  --exclude='.aws-sam' \
+  --exclude='node_modules' \
+  --exclude='.expo' \
+  --exclude='dist' \
+  --exclude='frontend-dist.zip' \
+  -C /d/Dev/projects/MOA_AG_Reserach/Schollar_System . | tar -xf - -C .
 
-# rsync's --include must precede the matching --exclude to win; verify .env.example
-# survived and no .env did:
-ls runner/.env.example || { echo "FATAL: .env.example was excluded too"; exit 1; }
+# Assert the exclusion did exactly what was intended, in BOTH directions.
+test -f runner/.env.example || { echo "FATAL: .env.example was excluded too"; exit 1; }
+test ! -f runner/.env       || { echo "FATAL: runner/.env was copied"; exit 1; }
+test ! -f frontend-ref/.env || { echo "FATAL: frontend-ref/.env was copied"; exit 1; }
 
 # --- Verify the tree is clean before anything is staged ---
 echo "--- env files remaining (expect ONLY .env.example) ---"
@@ -1248,21 +1256,23 @@ working copy, not harness content.
 ```bash
 cd /d/Dev/projects/agent-harness
 mkdir -p cores/moa-ag
-# Copy the agent core only. Exclude run output, the frozen harness copy, and
-# git metadata: .dockerignore and the manifest's image.exclude both guard this
-# too, but there is no reason to copy 10 GB of results to delete it later.
-rsync -a --delete \
-  --exclude '.git/' --exclude 'results/' --exclude 'reviews/' \
-  --exclude 'reviews_archive/' --exclude 'Schollar_System/' \
-  --exclude 'docs/' --exclude 'validation/' --exclude '.superpowers/' \
-  --exclude '__pycache__/' \
-  /d/Dev/projects/MOA_AG_Reserach/ cores/moa-ag/
-ls cores/moa-ag/CLAUDE.md cores/moa-ag/moa_lib
+# tar, not rsync (rsync is not installed here -- verified). Excludes run output,
+# the frozen harness copy, this plan's scratch space, and any .env.
+tar -cf - \
+  --exclude='.git' \
+  --exclude='.env' \
+  --exclude='results' \
+  --exclude='reviews' \
+  --exclude='reviews_archive' \
+  --exclude='Schollar_System' \
+  --exclude='docs' \
+  --exclude='validation' \
+  --exclude='.superpowers' \
+  --exclude='__pycache__' \
+  -C /d/Dev/projects/MOA_AG_Reserach . | tar -xf - -C cores/moa-ag
+test -f cores/moa-ag/CLAUDE.md || { echo "FATAL: core copy has no CLAUDE.md"; exit 1; }
+test -d cores/moa-ag/moa_lib   || { echo "FATAL: core copy has no moa_lib"; exit 1; }
 ```
-
-If `rsync` is unavailable in Git Bash, use
-`cp -r /d/Dev/projects/MOA_AG_Reserach/. cores/moa-ag/` followed by
-`rm -rf cores/moa-ag/{.git,results,reviews,reviews_archive,Schollar_System,docs,validation,.superpowers}`.
 
 Then record whether the 322 MB reference file came along — it is **not** in git,
 so whether it is present depends on whether the download script has ever been run
