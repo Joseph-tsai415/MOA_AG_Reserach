@@ -1954,16 +1954,26 @@ Copy `TEMPLATE` from `NEW/harness/prompt.py` into `OLD/.agent-core/prompt_run.md
 `{compounds}`, `{disease}`, `{run_dir}`, `{extra}`.
 
 ```bash
-mkdir -p /d/Dev/projects/MOA_AG_Reserach/.agent-core
 cd /d/Dev/projects/agent-harness
-conda run -n moa python -c "
+mkdir -p /d/Dev/projects/MOA_AG_Reserach/.agent-core
+
+# A SCRIPT FILE, not `python -c`: conda on this machine raises
+# NotImplementedError for newlines in -c (verified). Byte fidelity matters here —
+# Task 4's snapshots assert the rendered prompt is unchanged — so this extraction
+# must not be retyped by hand.
+cat > /tmp/extract_prompt.py <<'PY'
+import sys
 from pathlib import Path
-import sys; sys.path.insert(0, '.')
+sys.path.insert(0, r"D:\Dev\projects\agent-harness")
 from harness import prompt
-Path(r'D:\Dev\projects\MOA_AG_Reserach\.agent-core\prompt_run.md').write_text(
-    prompt.TEMPLATE, encoding='utf-8', newline='\n')
-print('wrote', len(prompt.TEMPLATE), 'chars')
-"
+
+out = Path(r"D:\Dev\projects\MOA_AG_Reserach\.agent-core\prompt_run.md")
+out.write_text(prompt.TEMPLATE, encoding="utf-8", newline="\n")
+written = out.read_text(encoding="utf-8")
+assert written == prompt.TEMPLATE, "round-trip differs from the module's TEMPLATE"
+print(f"wrote {len(prompt.TEMPLATE)} chars; round-trip identical")
+PY
+conda run -n moa python /tmp/extract_prompt.py
 ```
 
 Using the module as the source guarantees byte-fidelity — Task 13's snapshot
@@ -2737,15 +2747,23 @@ harness ships the template and a core may override it with `prompt.probe`. Copy
 
 ```bash
 cd /d/Dev/projects/agent-harness
-conda run -n moa python -c "
+
+# A SCRIPT FILE, not `python -c` (conda here raises NotImplementedError on
+# newlines in -c). The round-trip assertion is the point: this text is what the
+# probe snapshots are regenerated against.
+cat > /tmp/extract_probe.py <<'PY'
+import sys
 from pathlib import Path
-import sys; sys.path.insert(0, '.')
+sys.path.insert(0, r"D:\Dev\projects\agent-harness")
 from harness import prompt as p
-Path('harness/probe_prompt.md').write_text(
-    p.PROBE_TEMPLATE + '\n<<<DEFAULT_TASK>>>\n' + p.PROBE_DEFAULT_TASK,
-    encoding='utf-8', newline='\n')
-print('ok')
-"
+
+body = p.PROBE_TEMPLATE + "\n<<<DEFAULT_TASK>>>\n" + p.PROBE_DEFAULT_TASK
+out = Path(r"D:\Dev\projects\agent-harness\harness\probe_prompt.md")
+out.write_text(body, encoding="utf-8", newline="\n")
+assert out.read_text(encoding="utf-8") == body, "round-trip differs"
+print(f"wrote {len(body)} chars; round-trip identical")
+PY
+conda run -n moa python /tmp/extract_probe.py
 ```
 
 Generalise one sentence in the written file: replace
@@ -3069,13 +3087,21 @@ the new `test_manifest.py` and `test_templates.py` tests.
 
 - [ ] **Step 4: Verify the CLI is genuinely generic**
 
-Run: `cd /d/Dev/projects/agent-harness && conda run -n moa python -c "
-import sys; sys.path.insert(0,'.')
+Run:
+
+```bash
+cd /d/Dev/projects/agent-harness
+cat > /tmp/show_help.py <<'PY'
+import sys
 from pathlib import Path
+sys.path.insert(0, r"D:\Dev\projects\agent-harness")
 from harness.manifest import load_manifest
 from harness.run_once import build_parser
-build_parser(load_manifest(Path('cores/moa-ag'))).print_help()
-"`
+
+build_parser(load_manifest(Path("cores/moa-ag"))).print_help()
+PY
+conda run -n moa python /tmp/show_help.py
+```
 
 Expected: help text shows `--compounds`, `--disease`, `--notes`.
 
