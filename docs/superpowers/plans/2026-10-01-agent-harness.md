@@ -3565,6 +3565,41 @@ if __name__ == "__main__":
     main()
 ```
 
+- [ ] **Step 1b: Rewrite EVERY stale `Schollar_System/runner/...` path**
+
+Task 6 moved the tree but deliberately did not touch the Dockerfile, so **every**
+`COPY` in it still points at the pre-move layout. The container cannot build until
+all of them are rewritten, and the later steps in this task only cover some. Work
+through this exhaustive list — verify it against the file, because line numbers
+drift:
+
+| Stale path in the Dockerfile | New location |
+|---|---|
+| `COPY Schollar_System/runner/requirements/ /tmp/requirements/` | superseded by Step 2's `platform.txt` + `--from=core-stage` block |
+| `COPY Schollar_System/runner/container/conda /usr/local/bin/conda` | `COPY container/conda /usr/local/bin/conda` |
+| `COPY Schollar_System/runner/container/conda-init.sh /etc/conda-init.sh` | `COPY container/conda-init.sh /etc/conda-init.sh` |
+| `COPY CLAUDE.md /app/CLAUDE.md` | superseded — comes from `core-stage` |
+| `COPY moa_lib/ /app/moa_lib/` | superseded — comes from `core-stage` (it is payload, not harness) |
+| `COPY .claude/ /app/.claude/` | superseded — comes from `core-stage` |
+| `COPY Schollar_System/runner/app/ /app/service/` | `COPY harness/ /opt/harness/harness/` |
+| `COPY Schollar_System/runner/smoke_test.py /app/smoke_test.py` | superseded — `smoke_test.py` now lives **inside** the package at `harness/smoke_test.py`, so the `harness/` COPY already carries it |
+| `COPY Schollar_System/runner/entrypoint.sh /usr/local/bin/entrypoint.sh` | `COPY container/entrypoint.sh /usr/local/bin/entrypoint.sh` |
+
+Verify when done — **both commands must print nothing**:
+
+```bash
+cd /d/Dev/projects/agent-harness
+grep -n 'Schollar_System' container/Dockerfile container/docker-compose.yml
+grep -nE '^\s*COPY +(CLAUDE\.md|moa_lib/|\.claude/)' container/Dockerfile
+```
+
+The second guards a specific trap: `CLAUDE.md`, `moa_lib/` and `.claude/` now belong
+to the **core**, not the harness. A surviving top-level `COPY CLAUDE.md` would copy
+the *harness's own* dev manual into `/app`, where the agent would read it instead of
+the core's — silently corrupting every run. `.dockerignore` already excludes both, so
+such a COPY would fail the build rather than mis-copy; either way, remove them.
+
+
 - [ ] **Step 2: Rewrite the Dockerfile's core section**
 
 Replace the `--- the agent core ---` block and the mount-point block. Keep the
