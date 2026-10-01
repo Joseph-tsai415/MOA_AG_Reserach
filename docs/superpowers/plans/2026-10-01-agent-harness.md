@@ -4290,7 +4290,10 @@ And fix its header comment, which still says the image needs `CLAUDE.md`, `moa_l
 and `.claude/` from the repo root. Those are **core-layer** artifacts now; the image
 gets them from `cores/${HARNESS_CORE}/` via the Dockerfile's `core-stage`.
 
-**`deploy.sh` (repo root) — silently degraded, which is worse than broken.** Lines 92-93:
+**`deploy.sh` (repo root) — silently degraded, which is worse than broken.** THREE
+occurrences, at lines 92, 93 and **119** (the third was missed in the first audit of
+this file — `BUILT_TAG="$(git -C "$ROOT/.." rev-parse --short HEAD …)"`, which feeds the
+tag actually deployed, so it degrades the same way). Fix all three:
 
 ```bash
 SHA="$(git -C "$ROOT/.." rev-parse --short HEAD 2>/dev/null || echo nogit)"
