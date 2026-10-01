@@ -1217,7 +1217,7 @@ failure, rate limiting and API overload are platform concerns and stay here.
 | `harness/` | the python package; `python -m harness.run_once` |
 | `container/` | Dockerfile, compose, entrypoint, requirements (platform only) |
 | `cores/slot/` | gitignored copy-paste core slot (default) |
-| `cores/<name>/` | submodule-pinned cores |
+| `cores/<name>/` | drop-in cores (git-ignored local copies, re-synced by hand) |
 | `manifests/` | sidecar manifests for cores you cannot modify |
 | `backend-handler/`, `infra/`, `frontend-amplify/` | the Schollar reference service |
 | `tests/` | golden tests — see below |
