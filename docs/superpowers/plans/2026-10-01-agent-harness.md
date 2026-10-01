@@ -874,11 +874,36 @@ mkdir -p /d/Dev/projects/agent-harness
 cd /d/Dev/projects/agent-harness
 git init -b main
 cp -r /d/Dev/projects/MOA_AG_Reserach/Schollar_System/. .
-# Drop build detritus that should never have been in the tree.
+
+# --- Drop build detritus that should never have been in the tree ---
 find . -name __pycache__ -type d -prune -exec rm -rf {} +
 rm -rf frontend-amplify/.expo frontend-amplify/dist frontend-amplify/frontend-dist.zip
-rm -f runner/.env            # secrets: .env.example is the tracked one
+
+# --- SECRETS: delete before the first `git add`, not after ---
+# A secret committed and then removed still lives in the history. All four of
+# these were found by an explicit scan of the source tree; .env.example is the
+# only env file that is meant to be tracked.
+rm -f runner/.env
+rm -f frontend-ref/.env          # a second .env the first draft of this plan missed
+rm -rf infra/.aws-sam            # SAM build output; contains a built copy of the handler config
+
+# --- Verify the tree is clean before anything is staged ---
+echo "--- env files remaining (expect ONLY .env.example) ---"
+find . -name '.env' -o -name '.env.*' | grep -v node_modules
+echo "--- credential-shaped strings (expect NO output) ---"
+grep -rIlE 'sk-ant-[A-Za-z0-9_-]{10}|AKIA[0-9A-Z]{16}|gh[pous]_[A-Za-z0-9]{20}|-----BEGIN [A-Z ]*PRIVATE KEY-----' \
+    . 2>/dev/null | grep -v node_modules
+echo "--- end scan ---"
 ```
+
+**If either scan prints anything other than `.env.example`, stop and report it.**
+Do not stage, commit or push until the tree is clean. A secret reaches the remote
+on the first push and is then effectively public regardless of later deletion.
+
+> Note on AWS account ids: `infra/config.yaml` and `infra/NEXT_STEPS.md` contain the
+> account numbers `830278488932` and `712035115112`. These stay — they are not
+> credentials, and the repo is private. They are, however, a concrete reason the
+> private choice was correct.
 
 - [ ] **Step 2: Move to the target layout**
 
@@ -1245,8 +1270,28 @@ git commit -m "docs: freeze Schollar_System; the harness now lives in its own re
 Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 ```
 
-**Do not push `MOA_AG_Reserach`.** Its commits stay on the local branch
-`feat/agent-harness-extraction` for the operator to review and merge.
+**Do not push `MOA_AG_Reserach`, and do not merge its branch.** Operator decision:
+the commits stay on the local branch `feat/agent-harness-extraction`, unmerged and
+unpushed. `MOA_AG_Reserach` is a **public** repo and the harness code does not
+belong in it; only `agent-core.yaml`, `.agent-core/`, `runner-requirements/` and
+`MOVED.md` do, and those stay on the branch too until the operator says otherwise.
+
+- [ ] **Step 6: Create the PRIVATE GitHub repo and push the harness**
+
+Only after the Step 1 secret scan came back clean (`.env.example` and nothing else).
+
+```bash
+cd /d/Dev/projects/agent-harness
+gh repo create agent-harness --private --source=. --remote=origin --push
+gh repo view --json nameWithOwner,visibility,isPrivate
+```
+
+Expected: `"visibility":"PRIVATE"`, `"isPrivate":true`. **If it reports PUBLIC, stop
+and report it** — the repo carries `infra/` CloudFormation templates, deploy scripts
+and AWS account ids, and flipping a repo private after a push does not un-publish
+what was already fetched or indexed.
+
+`gh` is already authenticated as `Joseph-tsai415` with `repo` scope (verified).
 
 ---
 
