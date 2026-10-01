@@ -4204,7 +4204,7 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 ### Task 19: `infra/` and `backend-handler/` rewiring
 
 **Files:**
-- Modify: `NEW/infra/config.yaml`, `NEW/infra/stacks/compute-fargate.yaml`, `NEW/infra/stacks/data.yaml`, `NEW/infra/template.yaml`, `NEW/infra/scripts/{push-image.sh,verify.sh,validate_iam.py}`
+- Modify: `NEW/infra/config.yaml`, `NEW/infra/stacks/compute-fargate.yaml`, `NEW/infra/stacks/data.yaml`, `NEW/infra/template.yaml`, `NEW/infra/scripts/{push-image.sh,verify.sh,validate_iam.py}`, `NEW/deploy.sh`
 - Modify: `NEW/backend-handler/config/index.js`, `NEW/backend-handler/utils/{runQueue.js,runStore.js}`
 
 **Interfaces:**
@@ -4216,6 +4216,78 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 Run: `cd /d/Dev/projects/agent-harness && grep -rn "MOA_" infra backend-handler | grep -v "MOA_RUN_DIR"`
 
 Expected: no output. If there is any, apply the Task 15 Step 2 `sed` to those files.
+
+- [ ] **Step 1b: Fix the deploy scripts' path math — two are broken by the move**
+
+Audited after Task 7. `infra/scripts/{deploy,verify,lint}.sh` and
+`frontend-amplify/deploy.sh` are **fine** — they resolve `$(dirname "$0")` and only
+ever need their own directory. Two are not:
+
+**`infra/scripts/push-image.sh` — fatally broken (3 lines).** It would fail outright.
+
+| Line | Now | Why it breaks | Fix |
+|---|---|---|---|
+| 19 | `REPO_ROOT="$(cd ../.. && pwd)"` | Script `cd`s to `infra/` first. When `infra/` lived at `Schollar_System/infra/`, `../..` was the repo root. `infra/` is now one level below the root, so this resolves to the **parent of the whole repo**. | `REPO_ROOT="$(cd .. && pwd)"` |
+| 113 | `-f "${REPO_ROOT}/Schollar_System/runner/Dockerfile"` | That path does not exist in this repo. | `-f "${REPO_ROOT}/container/Dockerfile"` |
+| 113 | build context `"${REPO_ROOT}"` | Correct *once* `REPO_ROOT` is fixed — the context must be the repo root, which is the whole point of the extraction. | no change after line 19 is fixed |
+
+Also pass the core selector through, since Task 16 adds it as a build arg:
+
+```bash
+    docker build \
+        --platform linux/amd64 \
+        --build-arg "PROFILE=${BUILD_PROFILE}" \
+        --build-arg "HARNESS_CORE=${HARNESS_CORE:-moa-ag}" \
+        --build-arg "CLAUDE_CODE_VERSION=${CLAUDE_CODE_VERSION}" \
+        -f "${REPO_ROOT}/container/Dockerfile" \
+```
+
+And fix its header comment, which still says the image needs `CLAUDE.md`, `moa_lib/`
+and `.claude/` from the repo root. Those are **core-layer** artifacts now; the image
+gets them from `cores/${HARNESS_CORE}/` via the Dockerfile's `core-stage`.
+
+**`deploy.sh` (repo root) — silently degraded, which is worse than broken.** Lines 92-93:
+
+```bash
+SHA="$(git -C "$ROOT/.." rev-parse --short HEAD 2>/dev/null || echo nogit)"
+if [[ -n "$(git -C "$ROOT/.." status --porcelain -- "$ROOT" 2>/dev/null)" || "$SHA" == "nogit" ]]; then
+```
+
+`$ROOT` is the repo root now, so `$ROOT/..` points **outside the repo** — it was correct
+when `$ROOT` was `Schollar_System/` nested inside `MOA_AG_Reserach`. Consequences, in order:
+
+1. `rev-parse` fails, so `SHA` becomes the literal string `nogit`.
+2. `|| "$SHA" == "nogit"` is therefore **always true**, so the dirty-tree branch always fires.
+3. Every image gets a timestamp tag, and the clean-tree `IMAGE_TAG="$SHA"` path is dead code.
+
+Nothing errors. You just permanently lose the property the script's own comment insists
+on — *"Deploy the SHA: when a run misbehaves you need to know which image produced it"* —
+and you would not notice, because timestamp tags look deliberate.
+
+```bash
+SHA="$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo nogit)"
+if [[ -n "$(git -C "$ROOT" status --porcelain 2>/dev/null)" || "$SHA" == "nogit" ]]; then
+```
+
+Drop the `-- "$ROOT"` pathspec: it existed to scope the dirty check to `Schollar_System/`
+inside the larger science repo. The whole repo is the harness now, so scoping is pointless.
+Also fix the message on line 96, which names `Schollar_System/`.
+
+**Verify without touching AWS** — every one of these is read-only or `--help`:
+
+```bash
+cd /d/Dev/projects/agent-harness
+bash -n deploy.sh && bash -n infra/scripts/push-image.sh && echo "both parse"
+# REPO_ROOT must print the agent-harness root, and the Dockerfile must exist:
+( cd infra/scripts && cd .. && echo "REPO_ROOT would be: $(cd .. && pwd)" )
+test -f container/Dockerfile && echo "container/Dockerfile exists"
+# SHA must be a real short hash, NOT the string 'nogit':
+git -C . rev-parse --short HEAD
+```
+
+Do **not** run `./deploy.sh` or `push-image.sh` for real: they push to ECR and deploy
+CloudFormation. `bash -n` plus the path assertions above are the correct level of check
+for this task, and `infra/` has never been deployed, so nothing is live to break.
 
 - [ ] **Step 2: Make the resource prefix a configuration value**
 
