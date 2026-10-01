@@ -99,7 +99,7 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
-def split_values(raw: str) -> list[str]:
+def split_values(raw: str | None) -> list[str]:
     """Comma-separated CLI value -> list. Lifted verbatim from main_async's
     `[c.strip() for c in (args.compounds or "").split(",") if c.strip()]` so the
     conversion has one definition and can be pinned by a test."""
