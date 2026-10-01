@@ -2542,10 +2542,33 @@ Run: `cd /d/Dev/projects/agent-harness && conda run -n moa python -m pytest test
 
 Expected: all PASS.
 
-- [ ] **Step 4: Update the one caller**
+- [ ] **Step 4: Leave the caller alone — it cannot be fixed yet**
 
-Run: `grep -rn "ProgressWatcher(" harness/` and update `run_once.py` / `worker.py`
-to `ProgressWatcher.from_manifest(run_dir, emitter, manifest, settings.poll_seconds)`.
+`harness/run_once.py:485` is the only caller:
+
+```python
+watcher = None if probe else ProgressWatcher(run_dir, emitter, poll_seconds=settings.poll_seconds)
+```
+
+**Do not change it in this task.** There is no `manifest` in scope there — only
+`settings` — and `settings.manifest()` does not exist until Task 15. Rewiring it now
+would mean loading a manifest locally in `run_once.py`, which Task 15 would then have to
+undo.
+
+This repeats Task 10's deliberate pattern: that task rewrote `naming.py`'s signature and
+left `run_once.py` calling the old one. The repo is **intentionally inconsistent** between
+Tasks 10 and 15, and that is safe because the break is inside a function body rather than
+at import time — verified: `import harness.run_once` still succeeds with `naming.py`
+already rewritten, so the test suite is unaffected.
+
+Task 15 threads `settings.manifest()` through and fixes every such caller at once. Confirm
+you are leaving it by running:
+
+```bash
+grep -n 'ProgressWatcher(' harness/run_once.py
+```
+
+and reporting the line unchanged.
 
 - [ ] **Step 5: Commit**
 
