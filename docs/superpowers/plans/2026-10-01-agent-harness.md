@@ -3235,38 +3235,59 @@ exits without calling Claude. A failure naming a path above the repo root means 
 `$HarnessRoot` math is still wrong.
 
 
-- [ ] **Step 2: Sweep the rest of the harness and container**
+- [ ] **Step 2: Rename EVERY `MOA_*` env var — derive the list, do not trust a table**
+
+**Do not work from a hand-written list.** An earlier draft of this task carried a table of
+17 variables; the harness actually has **24**, and the five it missed
+(`MOA_TOKEN_PRICE_USD`, `MOA_BEDROCK_MODEL_MAP`, `MOA_SMALL_MODEL`,
+`MOA_ECS_TASK_PROTECTION`, `MOA_COST_EVENT_SECONDS`) live in `claude_runner.py` and
+`task_protection.py` — cost accounting, Bedrock model mapping and ECS scale-in protection.
+All are harness concerns, none were in the table, and a table-driven sweep would have left
+them reading a variable nobody sets any more. That is a silent config regression.
+
+Enumerate first:
 
 ```bash
 cd /d/Dev/projects/agent-harness
-grep -rln "MOA_" harness container doc backend-handler infra *.md 2>/dev/null \
-  | xargs sed -i \
-      -e 's/\bMOA_REPO_ROOT\b/HARNESS_CORE_ROOT/g' \
-      -e 's/\bMOA_RESULTS_ROOT\b/HARNESS_RESULTS_ROOT/g' \
-      -e 's/\bMOA_MODEL\b/HARNESS_MODEL/g' \
-      -e 's/\bMOA_MAX_TURNS\b/HARNESS_MAX_TURNS/g' \
-      -e 's/\bMOA_TIMEOUT_SECONDS\b/HARNESS_TIMEOUT_SECONDS/g' \
-      -e 's/\bMOA_MAX_COST_USD\b/HARNESS_MAX_COST_USD/g' \
-      -e 's/\bMOA_PERMISSION_MODE\b/HARNESS_PERMISSION_MODE/g' \
-      -e 's/\bMOA_ANSWER_TIMEOUT_SECONDS\b/HARNESS_ANSWER_TIMEOUT_SECONDS/g' \
-      -e 's/\bMOA_INBOX_POLL_SECONDS\b/HARNESS_INBOX_POLL_SECONDS/g' \
-      -e 's/\bMOA_IDLE_WAIT_SECONDS\b/HARNESS_IDLE_WAIT_SECONDS/g' \
-      -e 's/\bMOA_IDLE_BUDGET_SECONDS\b/HARNESS_IDLE_BUDGET_SECONDS/g' \
-      -e 's/\bMOA_TOOL_EVENT_EVERY\b/HARNESS_TOOL_EVENT_EVERY/g' \
-      -e 's/\bMOA_PROGRESS_POLL_SECONDS\b/HARNESS_PROGRESS_POLL_SECONDS/g' \
-      -e 's/\bMOA_BUILD_PROFILE\b/HARNESS_PROFILE/g' \
-      -e 's/\bMOA_MEM_LIMIT\b/HARNESS_MEM_LIMIT/g' \
-      -e 's/\bMOA_CPUS\b/HARNESS_CPUS/g' \
-      -e 's/\bMOA_WORKER_DRY_RUN\b/HARNESS_DRY_RUN/g'
+grep -rhoE 'MOA_[A-Z_]+' harness/ container/ backend-handler/ infra/ \
+    --include=*.py --include=*.sh --include=*.yml --include=*.yaml \
+    --include=*.ps1 --include=*.js --include=*.example 2>/dev/null \
+  | sort -u
 ```
 
-Then verify the only `MOA_` left are the two payload-owned names:
+Then rename **every** name that appears, with exactly two exceptions:
+
+| Keep unchanged | Why |
+|---|---|
+| `MOA_RUN_DIR` | **Payload-owned.** Declared by the core as `agent.run_dir_env`, and `cores/moa-ag/CLAUDE.md` §2 reads it by that name. Renaming it would force an edit to a core's operating manual, which this whole design exists to avoid. |
+| `MOA_CJK_FONT` | **Payload-owned.** Declared by the core as `image.env`. Same reasoning. |
+
+Everything else becomes `HARNESS_*` with the same suffix, except these three where the
+suffix also changes because the old name described the old project rather than the role:
+
+| Old | New |
+|---|---|
+| `MOA_REPO_ROOT` | `HARNESS_CORE_ROOT` (it points at the **core**, not at a repo) |
+| `MOA_BUILD_PROFILE` | `HARNESS_PROFILE` |
+| `MOA_WORKER_DRY_RUN` | `HARNESS_DRY_RUN` |
+
+`settings.repo_root` is renamed to `settings.core_root` to match. It has exactly **one**
+consumer — `run_once.py:515` (`repo_root=settings.core_root`) — verified by grep; every
+other `settings.*` attribute keeps its name and only changes which env var it reads.
+
+**Verify the sweep is complete.** Both commands must print nothing but the two
+payload-owned names:
 
 ```bash
-grep -rn "MOA_" harness container backend-handler infra | grep -v "MOA_RUN_DIR\|MOA_CJK_FONT" | grep -v cores/
+grep -rhoE 'MOA_[A-Z_]+' harness/ container/ backend-handler/ infra/ \
+    --include=*.py --include=*.sh --include=*.yml --include=*.yaml \
+    --include=*.ps1 --include=*.js --include=*.example 2>/dev/null \
+  | sort -u | grep -v 'MOA_RUN_DIR\|MOA_CJK_FONT'
+grep -rn 'settings\.repo_root' harness/
 ```
 
-Expected: **no output.** Anything printed is a missed rename.
+Report both outputs verbatim. A surviving `MOA_*` that is not one of the two is a missed
+rename; a surviving `settings.repo_root` is a missed consumer.
 
 - [ ] **Step 3: Write the failing preflight test**
 
