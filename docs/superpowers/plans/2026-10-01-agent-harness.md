@@ -2388,7 +2388,6 @@ expected value**:
 ```python
 # --- shim: the golden expectations below are unchanged; only the call
 # convention moved from positional args to (manifest, values). ---
-from pathlib import Path
 
 from harness import naming as _naming
 from _core import moa_manifest_or_skip
@@ -2517,7 +2516,6 @@ and `milestone.filename` → `milestone.artifact` throughout (the manifest's
 Replace `from app import progress as P` in `tests/test_progress_golden.py` with:
 
 ```python
-from pathlib import Path
 
 from harness import progress as _P
 from _core import moa_manifest_or_skip
@@ -2660,7 +2658,6 @@ are deleted; `_INFRA_FAILURES` and `detect_infra_failure` **stay**.
 Replace `from app import classify as C` in `tests/test_classify_golden.py` with:
 
 ```python
-from pathlib import Path
 
 from harness import classify as _C
 from _core import moa_manifest_or_skip
@@ -2907,7 +2904,6 @@ formatting. That asymmetry is deliberate; do not "tidy" it.
 Replace `from app import prompt as PR` in `tests/test_prompt_golden.py` with:
 
 ```python
-from pathlib import Path
 
 from harness import prompt as _PR
 from harness.manifest import load_manifest
@@ -3058,7 +3054,6 @@ for spec in manifest.inputs:
 Replace `from app.run_once import build_parser` in `tests/test_cli_golden.py` with:
 
 ```python
-from pathlib import Path
 
 from _core import moa_manifest_or_skip
 from harness.run_once import build_parser as _build_parser
