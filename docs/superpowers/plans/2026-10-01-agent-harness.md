@@ -873,19 +873,24 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 mkdir -p /d/Dev/projects/agent-harness
 cd /d/Dev/projects/agent-harness
 git init -b main
-cp -r /d/Dev/projects/MOA_AG_Reserach/Schollar_System/. .
+# --- Copy with secrets EXCLUDED, rather than copy-then-delete -------------
+# `runner/.env` holds a LIVE ANTHROPIC API KEY (verified by scan). Never copy a
+# secret and delete it afterwards: that leaves it on disk in a second location,
+# and one forgotten `git add -A` in between is unrecoverable. Exclude at source.
+rsync -a \
+  --exclude '.git/' \
+  --exclude '.env' --exclude '.env.*' --include '.env.example' \
+  --exclude '__pycache__/' \
+  --exclude '.aws-sam/' \
+  --exclude 'node_modules/' \
+  --exclude '.expo/' \
+  --exclude 'dist/' \
+  --exclude 'frontend-dist.zip' \
+  /d/Dev/projects/MOA_AG_Reserach/Schollar_System/ .
 
-# --- Drop build detritus that should never have been in the tree ---
-find . -name __pycache__ -type d -prune -exec rm -rf {} +
-rm -rf frontend-amplify/.expo frontend-amplify/dist frontend-amplify/frontend-dist.zip
-
-# --- SECRETS: delete before the first `git add`, not after ---
-# A secret committed and then removed still lives in the history. All four of
-# these were found by an explicit scan of the source tree; .env.example is the
-# only env file that is meant to be tracked.
-rm -f runner/.env
-rm -f frontend-ref/.env          # a second .env the first draft of this plan missed
-rm -rf infra/.aws-sam            # SAM build output; contains a built copy of the handler config
+# rsync's --include must precede the matching --exclude to win; verify .env.example
+# survived and no .env did:
+ls runner/.env.example || { echo "FATAL: .env.example was excluded too"; exit 1; }
 
 # --- Verify the tree is clean before anything is staged ---
 echo "--- env files remaining (expect ONLY .env.example) ---"
