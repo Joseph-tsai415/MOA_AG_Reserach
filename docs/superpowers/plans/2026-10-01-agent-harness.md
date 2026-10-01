@@ -691,14 +691,53 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 - Consumes: nothing
 - Produces: the CLI contract Task 14 must preserve
 
-- [ ] **Step 1: Locate the parser factory**
+- [ ] **Step 1: Extract `build_parser()` and `split_values()` (pure refactor)**
 
-Run: `cd OLD/Schollar_System/runner && grep -n "add_argument\|ArgumentParser\|def main\|def _parse" app/run_once.py`
+Already confirmed by inspection: there is **no** `build_parser`. `app/run_once.py:71`
+has `parse_args(argv)`, which builds the parser, parses, **and** validates in one
+function. Split it so the parser is testable without invoking a run, preserving
+behaviour exactly:
 
-If the parser is built inline inside `main()`, extract it into a module-level
-`build_parser() -> argparse.ArgumentParser` first (pure refactor, no behaviour
-change) so it is testable without invoking a run. Commit that extraction as its
-own step before writing the test.
+```python
+def build_parser() -> argparse.ArgumentParser:
+    """Everything from today's parse_args up to (not including) p.parse_args()."""
+    p = argparse.ArgumentParser(
+        prog="run_once",
+        description="Run one MOA-AG pipeline job headlessly via Claude Code.",
+    )
+    ...  # every existing add_argument call, verbatim and in the same order
+    return p
+
+
+def split_values(raw: str) -> list[str]:
+    """Comma-separated CLI value -> list. Lifted verbatim from main_async's
+    `[c.strip() for c in (args.compounds or "").split(",") if c.strip()]` so the
+    conversion has one definition and can be pinned by a test."""
+    return [v.strip() for v in (raw or "").split(",") if v.strip()]
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    p = build_parser()
+    args = p.parse_args(argv)
+    # Conditional, NOT argparse `required=True`: --kind probe needs neither value.
+    if args.kind == "moa" and not (args.compounds.strip() and args.disease.strip()):
+        p.error("--compounds and --disease are required for --kind moa")
+    ...  # any remaining existing validation, unchanged
+    return args
+```
+
+Then replace the inline list comprehension at `app/run_once.py:413` with
+`compounds = split_values(args.compounds)`. Commit this extraction on its own
+before writing the test.
+
+> **The CLI contract this pins, which Task 14 MUST NOT change:** `--compounds` is a
+> single **comma-separated string** (`--compounds "Gallic acid,Phellopterin"`), with
+> `default=""`. It is NOT `nargs="+"`. `worker.py:128` depends on it
+> (`compounds=",".join(compounds)`) and so does `doc/API_PROTOCOL.md`. When Task 14
+> generates arguments from a manifest `string_list` input, it generates **this**
+> shape — a single string split by `split_values` — not `nargs="+"`. Changing the
+> CLI shape mid-refactor would violate the Global Constraint that today's exact CLI
+> still parses.
 
 - [ ] **Step 2: Write the test**
 
@@ -706,43 +745,96 @@ own step before writing the test.
 
 ```python
 """Pins today's CLI contract. Task 14 rebuilds this parser from the manifest's
-`inputs[]`; these assertions must still hold afterwards."""
+`inputs[]`; every assertion here must still hold afterwards.
+
+Note what the real contract is, because it is not the obvious one:
+  * --compounds is ONE comma-separated string, not nargs="+".
+  * Neither --compounds nor --disease is argparse-`required`; they are validated
+    conditionally, because --kind probe legitimately needs neither.
+"""
 
 from __future__ import annotations
 
 import pytest
 
-from app.run_once import build_parser
+from app.run_once import build_parser, parse_args, split_values
 
 
-def test_minimal_invocation():
+# --- the parser itself (no validation) ------------------------------------
+def test_compounds_is_a_single_comma_separated_string():
     args = build_parser().parse_args(
         ["--compounds", "Curcumin", "--disease", "Atopic Dermatitis"])
-    assert args.compounds == ["Curcumin"]
+    assert args.compounds == "Curcumin"          # a str, NOT ["Curcumin"]
     assert args.disease == "Atopic Dermatitis"
 
 
-def test_multiple_compounds():
+def test_multiple_compounds_travel_as_one_comma_joined_value():
     args = build_parser().parse_args(
-        ["--compounds", "Curcumin", "Gallic acid", "--disease", "AD"])
-    assert args.compounds == ["Curcumin", "Gallic acid"]
+        ["--compounds", "Curcumin,Gallic acid", "--disease", "AD"])
+    assert args.compounds == "Curcumin,Gallic acid"
+
+
+def test_compounds_and_disease_default_to_empty_string():
+    args = build_parser().parse_args([])
+    assert args.compounds == ""
+    assert args.disease == ""
+
+
+def test_kind_defaults_to_moa_and_rejects_unknown_values():
+    assert build_parser().parse_args([]).kind == "moa"
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["--kind", "nonsense"])
 
 
 def test_dry_run_flag_defaults_false_and_sets_true():
     p = build_parser()
-    assert p.parse_args(["--compounds", "C", "--disease", "D"]).dry_run is False
-    assert p.parse_args(["--compounds", "C", "--disease", "D", "--dry-run"]).dry_run is True
+    assert p.parse_args([]).dry_run is False
+    assert p.parse_args(["--dry-run"]).dry_run is True
 
 
-def test_disease_is_required():
+# --- the comma-splitting conversion ---------------------------------------
+@pytest.mark.parametrize("raw,expected", [
+    ("Curcumin", ["Curcumin"]),
+    ("Curcumin,Gallic acid", ["Curcumin", "Gallic acid"]),
+    ("  Curcumin , Gallic acid  ", ["Curcumin", "Gallic acid"]),
+    ("Curcumin,,Gallic acid", ["Curcumin", "Gallic acid"]),   # empties dropped
+    ("", []),
+    (None, []),
+])
+def test_split_values(raw, expected):
+    assert split_values(raw) == expected
+
+
+# --- the CONDITIONAL validation -------------------------------------------
+def test_moa_requires_both_values():
     with pytest.raises(SystemExit):
-        build_parser().parse_args(["--compounds", "Curcumin"])
+        parse_args(["--compounds", "Curcumin"])          # no --disease
+    with pytest.raises(SystemExit):
+        parse_args(["--disease", "AD"])                  # no --compounds
+    with pytest.raises(SystemExit):
+        parse_args([])                                    # neither
+
+
+def test_moa_accepts_both_values():
+    args = parse_args(["--compounds", "Curcumin", "--disease", "AD"])
+    assert args.kind == "moa"
+
+
+def test_probe_needs_neither_value():
+    # The reason the validation is conditional rather than argparse-required.
+    args = parse_args(["--kind", "probe"])
+    assert args.kind == "probe"
+    assert args.compounds == ""
+
+
+def test_whitespace_only_values_do_not_satisfy_moa():
+    with pytest.raises(SystemExit):
+        parse_args(["--compounds", "   ", "--disease", "   "])
 ```
 
-Before running, confirm each asserted attribute exists by reading the parser
-setup. Adjust attribute names to what the module actually defines — the point is
-to pin reality, not to invent a contract. If `--dry-run` or `--kind` take
-different names, use the real ones.
+Before running, read `app/run_once.py:71-101` and confirm every asserted attribute
+and default matches. **If any expectation above disagrees with the module, change
+the test to match the module and report it** — the point is to pin reality.
 
 - [ ] **Step 3: Run the tests**
 
@@ -1174,7 +1266,7 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
   - `class ManifestError(Exception)`
   - `Manifest` dataclass with attributes: `name: str`, `display_name: str`, `version: str`, `instructions: str`, `setting_sources: list[str]`, `run_dir_env: str`, `defaults: Defaults`, `conda_env: str`, `package_paths: list[str]`, `import_check: list[str]`, `requirements: dict[str, str]`, `default_profile: str`, `inputs: list[InputSpec]`, `run_dir: RunDirSpec`, `prompt_run: str | None`, `prompt_probe: str | None`, `milestones: list[Milestone]`, `halts: dict[str, str]`, `success_requires: list[str]`, `deliverable: str | None`, `headline_artifact: str | None`, `headline_section: str | None`, `qa_artifact: str | None`, `qa_verdicts: list[str]`, `qa_blocking: list[str]`, `required_paths: list[str]`, `reference_data: list[ReferenceData]`, `image_exclude: list[str]`, `image_env: dict[str, str]`, `artifact_exclude: list[str]`
   - `class Milestone` with `artifact: str`, `phase: str`, `percent: int`, `label: str`
-  - `class InputSpec` with `name: str`, `type: str`, `required: bool`, `cli: str`
+  - `class InputSpec` with `name: str`, `type: str`, `required: bool`, `cli: str`, `help: str = ""`, and a `is_list` property (`type == "string_list"`)
   - `class RunDirSpec` with `template: str`, `fallback: str`, `session_suffix: str`, `probe_base: str`
   - `class ReferenceData` with `path: str`, `min_bytes: int`, `required: bool`, `provision: str | None`
   - `class Defaults` with `model: str`, `max_turns: int`, `permission_mode: str`
@@ -1370,6 +1462,7 @@ class InputSpec:
     type: str          # "string" | "string_list"
     required: bool
     cli: str
+    help: str = ""     # optional argparse help; a default is generated when absent
 
     @property
     def is_list(self) -> bool:
@@ -1531,6 +1624,7 @@ def load_manifest(core_root: Path, *, sidecar_dir: Path | None = None) -> Manife
             name=name, type=itype,
             required=bool(item.get("required", False)),
             cli=item.get("cli") or f"--{name.replace('_', '-')}",
+            help=item.get("help", ""),
         ))
 
     # --- run_dir, cross-checked against inputs ---
@@ -2759,7 +2853,7 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 
 **Interfaces:**
 - Consumes: `Manifest`, `InputSpec`
-- Produces: `build_parser(manifest: Manifest) -> argparse.ArgumentParser`; `collect_values(args, manifest) -> dict[str, object]`
+- Produces: `build_parser(manifest: Manifest) -> argparse.ArgumentParser`; `split_values(raw: str) -> list[str]`; `collect_values(args, manifest) -> dict[str, object]`; `validate_values(parser, args, manifest) -> None`; `parse_args(argv, manifest) -> argparse.Namespace`
 
 - [ ] **Step 1: Replace the hard-coded arguments**
 
@@ -2774,35 +2868,70 @@ def build_parser(manifest: Manifest) -> argparse.ArgumentParser:
         description=f"Run one {manifest.display_name} job, start to finish.",
     )
     # --- payload inputs, declared by the core's manifest ---
+    # EVERY input is a single string argument with default="", including
+    # string_list: a list arrives comma-separated and is split by split_values.
+    # This is NOT a style choice — nargs="+" would change the CLI contract that
+    # Task 5 pinned, and worker.py:128 (`",".join(compounds)`) plus
+    # doc/API_PROTOCOL.md both depend on the comma form.
+    #
+    # `required` is NOT passed to argparse either. Requiredness is conditional:
+    # `--kind probe` needs no payload input at all. It is validated below.
     for spec in manifest.inputs:
-        if spec.is_list:
-            parser.add_argument(spec.cli, dest=spec.name, nargs="+",
-                                required=spec.required, metavar=spec.name.upper())
-        else:
-            parser.add_argument(spec.cli, dest=spec.name,
-                                required=spec.required, default="",
-                                metavar=spec.name.upper())
+        metavar = spec.name.upper() + (",…" if spec.is_list else "")
+        parser.add_argument(spec.cli, dest=spec.name, default="", metavar=metavar,
+                            help=spec.help or (f"comma-separated {spec.name}"
+                                               if spec.is_list else spec.name))
     # --- harness flags (unchanged; keep the existing block verbatim) ---
     ...
     return parser
 
 
+def split_values(raw: str) -> list[str]:
+    """Comma-separated CLI value -> list, dropping empties."""
+    return [v.strip() for v in (raw or "").split(",") if v.strip()]
+
+
 def collect_values(args: argparse.Namespace, manifest: Manifest) -> dict[str, object]:
-    """Pull just the payload inputs out of parsed args, in manifest order."""
-    return {spec.name: getattr(args, spec.name, [] if spec.is_list else "")
-            for spec in manifest.inputs}
+    """Payload inputs out of parsed args, in manifest order, with list inputs split."""
+    out: dict[str, object] = {}
+    for spec in manifest.inputs:
+        raw = getattr(args, spec.name, "") or ""
+        out[spec.name] = split_values(raw) if spec.is_list else raw.strip()
+    return out
+
+
+def validate_values(parser, args, manifest: Manifest) -> None:
+    """Conditional requiredness, preserving today's behaviour exactly: payload
+    inputs are required for a real run, and not required for a probe."""
+    if args.kind != "moa":
+        return
+    values = collect_values(args, manifest)
+    missing = [s.cli for s in manifest.inputs if s.required and not values[s.name]]
+    if missing:
+        parser.error(f"{' and '.join(missing)} are required for --kind moa")
 ```
 
-Then replace every `args.compounds` / `args.disease` use in the module body with
+Call `validate_values(p, args, manifest)` from `parse_args` where today's
+`if args.kind == "moa" and not (...)` check lives, then replace every
+`args.compounds` / `args.disease` use in the module body with
 `values = collect_values(args, manifest)` threaded into `build_prompt`,
 `next_session_dir` and the event payloads.
 
-In `harness/worker.py`, map the SQS body generically — replace the explicit
-`body["compounds"]`, `body["disease"]` reads with:
+`InputSpec` gains an optional `help: str = ""` field in `harness/manifest.py`
+(Task 8) so a core can supply its own argument help text; absent, the generated
+default above is used.
+
+In `harness/worker.py`, map the SQS body generically. Today it accepts a list OR a
+string and comma-joins for the CLI (`worker.py:120-128`) — preserve both halves:
 
 ```python
-values = {spec.name: body.get(spec.name, [] if spec.is_list else "")
-          for spec in manifest.inputs}
+values = {}
+for spec in manifest.inputs:
+    raw = body.get(spec.name, "")
+    if spec.is_list:
+        values[spec.name] = [raw] if isinstance(raw, str) and raw else list(raw or [])
+    else:
+        values[spec.name] = str(raw or "")
 ```
 
 - [ ] **Step 2: Add the shim to the golden test**
@@ -2814,12 +2943,18 @@ from pathlib import Path
 
 from _core import moa_manifest_or_skip
 from harness.run_once import build_parser as _build_parser
+from harness.run_once import parse_args as _parse_args
+from harness.run_once import split_values  # noqa: F401 — manifest-free, imported as-is
 
 _MOA = moa_manifest_or_skip()
 
 
 def build_parser():
     return _build_parser(_MOA)
+
+
+def parse_args(argv=None):
+    return _parse_args(argv, _MOA)
 ```
 
 Every assertion stays as written — this is the proof the CLI contract survived.
