@@ -21,6 +21,12 @@ def run_dir_factory(tmp_path):
     underscores is NOT done — pass real names via the `files` dict instead)."""
 
     def _make(*filenames: str, files: dict[str, str] | None = None) -> Path:
+        """Build a fake run directory.
+
+        Positional args are filenames created with placeholder content, for tests that
+        only care whether a file exists. `files` maps filename -> exact content, for
+        tests that read it back. Both accept nested paths ("figures/step1.png").
+        """
         d = tmp_path / "run"
         d.mkdir(exist_ok=True)
         for name in filenames:
