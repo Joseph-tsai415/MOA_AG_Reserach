@@ -1150,17 +1150,17 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 
 ---
 
-### Task 7: freeze the old copy; add the submodule
+### Task 7: freeze the old copy; drop the MOA core in; publish privately
 
 **Files:**
 - Create: `OLD/Schollar_System/MOVED.md`
 - Create: `NEW/CLAUDE.md`
 - Create: `NEW/.claude/` (minimal)
-- Modify: `NEW/.gitmodules` (via `git submodule add`)
+- Create: `NEW/cores/moa-ag/` (a git-ignored COPY, not a submodule — see the ruling in Global Constraints)
 
 **Interfaces:**
 - Consumes: the `NEW` repo from Task 6
-- Produces: `cores/moa-ag/` populated; `HARNESS_CORE=moa-ag` resolvable
+- Produces: `cores/moa-ag/` populated as a git-ignored local copy; `HARNESS_CORE=moa-ag` resolvable; the harness published as a PRIVATE GitHub repo
 
 - [ ] **Step 1: Mark the old tree dead**
 
