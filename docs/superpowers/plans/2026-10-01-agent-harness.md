@@ -3878,6 +3878,42 @@ RUN mkdir -p /data/results \
 Update `CMD` to `["python", "-m", "harness.run_once", "--help"]` and the
 `HEALTHCHECK` to `CMD python -m harness.preflight && claude --version || exit 1`.
 
+- [ ] **Step 3b: Export the core's `python.package_paths` — the field is currently DEAD**
+
+Found during Task 15: `manifest.package_paths` is declared in the dataclass, validated in
+the known-key set, and parsed into the `Manifest` — and then **consumed by nothing**. Grep
+confirms three hits, all inside `manifest.py` itself.
+
+It appears to work today only by accident: the container sets `PYTHONPATH` to include the
+core root, and MOA's `moa_lib` happens to sit exactly there. A core declaring
+`package_paths: [src]`, with its package in a subdirectory, would have that declaration
+silently ignored — the manifest would be making a promise the harness never keeps.
+
+Add to `entrypoint.sh`, next to the `image.env` application:
+
+```bash
+# --- put the core's declared packages on PYTHONPATH -----------------------
+# python.package_paths is the core saying "these directories hold my importable
+# packages". Without this it is a dead field: MOA works only because moa_lib sits
+# at the core root, which PYTHONPATH already includes.
+core_paths="$(python - <<'PY'
+from harness.config import settings
+m = settings.manifest()
+print(":".join(str(settings.core_root / p) for p in m.package_paths))
+PY
+)"
+if [[ -n "${core_paths}" ]]; then
+    export PYTHONPATH="${core_paths}:${PYTHONPATH}"
+    log "core packages: ${core_paths}"
+fi
+```
+
+And make `preflight.py` honest about it: before running `import_check`, prepend each
+`core_root / p` to `sys.path`, so the gate tests what the run will actually see rather than
+passing by coincidence. Without that, `preflight` can pass on a machine where `PYTHONPATH`
+already happens to cover the packages and fail on one where it does not.
+
+
 - [ ] **Step 3: Apply the core's `image.env` in `entrypoint.sh`**
 
 Insert before the preflight call:
