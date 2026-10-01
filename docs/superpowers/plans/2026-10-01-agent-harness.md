@@ -3249,9 +3249,11 @@ Enumerate first:
 
 ```bash
 cd /d/Dev/projects/agent-harness
-grep -rhoE 'MOA_[A-Z_]+' harness/ container/ backend-handler/ infra/ \
-    --include=*.py --include=*.sh --include=*.yml --include=*.yaml \
-    --include=*.ps1 --include=*.js --include=*.example 2>/dev/null \
+# Tracked files, NOT an --include filter: an --include list cannot match an
+# extensionless filename, and container/Dockerfile is exactly that. An earlier draft
+# filtered by extension, so its "must print nothing" check could not see the two
+# MOA_* vars still in the Dockerfile. git ls-files also keeps vendor/build junk out.
+grep -IhoE 'MOA_[A-Z_]+' $(git ls-files harness container backend-handler infra) 2>/dev/null \
   | sort -u
 ```
 
@@ -3279,9 +3281,7 @@ other `settings.*` attribute keeps its name and only changes which env var it re
 payload-owned names:
 
 ```bash
-grep -rhoE 'MOA_[A-Z_]+' harness/ container/ backend-handler/ infra/ \
-    --include=*.py --include=*.sh --include=*.yml --include=*.yaml \
-    --include=*.ps1 --include=*.js --include=*.example 2>/dev/null \
+grep -IhoE 'MOA_[A-Z_]+' $(git ls-files harness container backend-handler infra) 2>/dev/null \
   | sort -u | grep -v 'MOA_RUN_DIR\|MOA_CJK_FONT'
 grep -rn 'settings\.repo_root' harness/
 ```
@@ -4467,9 +4467,10 @@ cd /d/Dev/projects/agent-harness
 # Repo-wide, NOT scoped to a few directories: Task 6 found stale references in
 # infra/README.md and doc/reference/, both of which an earlier, narrower version
 # of this sweep missed entirely.
-grep -rnE 'Schollar_System|runner/app|runner/tests|service\.run_once|app\.run_once|moa-runner|MOA_BUILD_PROFILE' \
-    . --include=*.md --include=*.sh --include=*.yml --include=*.ps1 --include=*.py \
-    | grep -v '/\.git/' | grep -v node_modules | grep -v '/cores/'
+# Tracked files, not an extension filter: container/Dockerfile is extensionless and
+# DOES carry stale Schollar_System paths, so an --include sweep misses it entirely.
+grep -InE 'Schollar_System|runner/app|runner/tests|service\.run_once|app\.run_once|moa-runner|MOA_BUILD_PROFILE' \
+    $(git ls-files | grep -v '^cores/') 2>/dev/null | grep -v node_modules
 ```
 
 Expected: eventually no output, **except** hits in `container/Dockerfile`, `container/docker-compose.yml` and `container/run_local.ps1` — those three are rewritten by Tasks 15 and 16, so leave them and note them. Every other hit is this task's to fix. `cores/` is excluded because a core is someone else's payload — its documentation is not ours to rewrite.
