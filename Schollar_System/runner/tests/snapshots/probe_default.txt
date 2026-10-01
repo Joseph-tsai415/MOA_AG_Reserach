@@ -1,0 +1,62 @@
+THIS IS AN INFRASTRUCTURE PROBE, NOT A RESEARCH RUN.
+
+You are running headlessly inside the service container so the operators can
+verify that (1) Claude Code runs here, (2) your activity streams to the
+frontend, and (3) files you write are uploaded to storage while you work.
+
+Do NOT start the MOA-AG research pipeline described in CLAUDE.md. Do not run
+Steps 0-5, do not spawn pipeline sub-agents, and do not write the pipeline's
+report, QA review, or PDF. Keep the session short.
+
+NETWORK IS ALLOWED when the task asks for it: PubMed / NCBI E-utilities and
+other public APIs, WebSearch and WebFetch, and downloading files (e.g. an
+open-access PDF) into the output directory. The point is to verify that the
+container can do what real runs do. Keep it to a handful of requests (NCBI:
+at most 3 per second), and if a tool or site fails, record the exact error in
+your output instead of working around it silently — a failure is a useful
+probe result.
+
+OUTPUT DIRECTORY
+  Write every file into `results/probe_session1/` (relative to the current working
+  directory). It already exists. Do not create any other results directory.
+
+SAFETY
+  Never print, echo, or write environment variables, credentials, API keys, or
+  tokens — not even to show that they exist.
+
+QUESTIONS
+  The AskUserQuestion tool is available and wired to the frontend. Use it ONLY
+  if the task below explicitly asks you to ask a question (this is one of the
+  things a probe may be asked to verify). Otherwise do not ask — nobody may be
+  watching, and an unanswered question just stalls the probe until it times out
+  and answers itself.
+
+TASK
+  1. Run one Bash command to get the Python version (e.g. `python --version`).
+  2. Write `results/probe_session1/hello.json` containing: "model" (the model you
+     are running as), "timestamp" (current UTC time, ISO-8601), and
+     "python_version" (the output of step 1).
+  3. Write `results/probe_session1/table.csv` with a header row and 3-5 data rows of
+     simple made-up example values (e.g. columns: id,label,value).
+  4. Write `results/probe_session1/notes.md`: a short markdown note listing the
+     files you created and at least one skill name you can see in
+     `.claude/skills/` (list the directory to find one).
+  5. Write a python script `results/probe_session1/scripts/make_chart.py` that uses
+     matplotlib (Agg backend) to save a tiny line or bar chart to
+     `results/probe_session1/figures/chart.png`, then run it with one Bash call.
+  6. Write `results/probe_session1/中文檔名測試.txt` (UTF-8 filename check) containing
+     one line of UTF-8 text, e.g. `中文檔名測試 OK`.
+  7. In your final message, name at least one skill you can see.
+
+ENDING THE SESSION — the line below is a SWITCH, not a formality
+  The session stays open between your turns: after you stop talking the
+  operator can send another message and you continue with full context.
+
+  Write this line ONLY when the whole job is done and you expect no further
+  messages, because it ENDS the session immediately:
+
+    RUN_COMPLETE: completed - <one line describing what you did>
+
+  If you have finished a step but the operator may say more — you asked them
+  something, they told you to wait, or the task is explicitly multi-turn — then
+  do NOT write it. Just answer and stop; the session waits for them.
