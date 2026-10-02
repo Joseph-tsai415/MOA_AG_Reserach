@@ -46,6 +46,35 @@ python:
     - reportlab
     - pymupdf
     - matplotlib_venn
+  # Breadth, not a gate -- probed WARN-only by harness/smoke_test.py, never by
+  # preflight.py. A base-tier image legitimately lacks the omics modules
+  # (pydeseq2/scanpy/anndata are an opt-in Transcriptomics Track dependency,
+  # not every run's requirement), and a missing plotting/doc helper degrades
+  # one figure or one skill rather than invalidating a run outright. The HARD
+  # startup gate stays import_check above; do not move anything out of it into
+  # here to "fix" a failing build -- that is weakening the gate, not the point
+  # of this list.
+  smoke_imports:
+    - chembl_webresource_client  # chembl-database skill, Step 1
+    - Bio                        # Entrez / GEO (biopython)
+    - datamol                    # datamol skill
+    - medchem                    # PAINS / alerts, Step 1
+    - reactome2py                # reactome-database skill, Step 4
+    - gseapy                     # enrichment
+    - plotly                     # Step 4 Sankey
+    - kaleido                    # plotly -> PNG
+    - sklearn                    # ML utilities
+    - vina                       # L3 docking
+    - meeko                      # docking prep
+    - openbabel                  # format conversion
+    - docx                       # DOCX artifacts
+    - pptx                       # PPTX artifacts
+    - openpyxl                   # XLSX artifacts
+    - pypdf                      # PDF read
+    - markitdown                 # doc -> markdown
+    - pydeseq2                   # Transcriptomics Track (omics/full tier only)
+    - scanpy                     # Transcriptomics Track (omics/full tier only)
+    - anndata                    # Transcriptomics Track (omics/full tier only)
   requirements:
     base:  runner-requirements/base.txt
     omics: runner-requirements/omics.txt
