@@ -36,9 +36,9 @@ To search for genes by symbol or name across organisms:
 3. The script returns matching Gene IDs
 
 Example query patterns:
-- Gene symbol: `insulin[gene name] AND human[organism]`
-- Gene with disease: `dystrophin[gene name] AND muscular dystrophy[disease]`
-- Chromosome location: `human[organism] AND 17q21[chromosome]`
+- Gene symbol: `INS[pref] AND human[orgn]` (official symbol; `[gene]` also matches aliases)
+- Gene with disease: `DMD[pref] AND "muscular dystrophy"[dis] AND human[orgn]`
+- Chromosome location: `17q21[MV] AND human[orgn]` (band) or `17[chr] AND human[orgn]`
 
 ### Retrieve Gene Information by ID
 
@@ -79,9 +79,44 @@ To find genes associated with specific biological functions or phenotypes:
 3. Filter by organism, chromosome, or other attributes
 
 Example searches:
-- By GO term: `GO:0006915[biological process]` (apoptosis)
-- By phenotype: `diabetes[phenotype] AND mouse[organism]`
-- By pathway: `insulin signaling pathway[pathway]`
+- By GO term: `"apoptotic process"[GO] AND human[orgn]` (term name, not the GO ID)
+- By disease/phenotype: `"diabetes"[dis] AND mouse[orgn]`
+- By pathway: there is no pathway field — use a GO process (`"insulin receptor signaling pathway"[GO]`) or the KEGG/Reactome skills
+
+### Two silent failures (read before mapping gene lists)
+
+**1. Symbols collide with aliases.** `FLG[gene] AND human[orgn]` returns **FGFR1 first** (FLG is an
+FGFR1 alias) and filaggrin second; the Datasets endpoint `symbol/FLG/taxon/9606` does the same. Taking
+the first hit silently turns filaggrin into FGFR1 — in an intersection that invents or deletes a hub gene.
+Resolve official symbols first and accept an alias only when it is unique:
+
+| Step | Query | FLG | IL8 |
+|---|---|---|---|
+| official symbol | `FLG[pref] AND human[orgn] AND alive[prop]` | FLG (2312) | none |
+| alias fallback | `IL8[gene] AND human[orgn] AND alive[prop]` | — | CXCL8 (3576), flagged `alias` |
+
+`scripts/batch_gene_lookup.py` (`resolve_symbol`) and `fetch_gene_data.py` (`fetch_gene_by_symbol`) now do
+this and report `match: official | alias | ambiguous`. Report how many inputs mapped through aliases and
+list ambiguous ones; never pick among them silently.
+
+**2. Unknown field tags are ignored without an error.** ESearch treats an unrecognised tag as All Fields:
+`diabetes[disease]`, `diabetes[phenotype]`, `MAPK signaling pathway[pathway]` and `9606[taxid]` return
+exactly the same counts as a made-up tag. Use only fields from `einfo.fcgi?db=gene`:
+
+| Want | Correct (verified 2026-11) | Wrong (silently ignored or empty) |
+|---|---|---|
+| Official symbol | `INS[pref]` | `insulin[gene name]` (0: "insulin" is not a symbol) |
+| Symbol or alias | `IL8[gene]` | |
+| Disease/phenotype | `"diabetes"[dis]` (quote phrases) | `[disease]`, `[phenotype]` |
+| GO term | `"apoptotic process"[GO]` (term name) | `GO:0006915[biological process]` (0) |
+| Pathway | no pathway field — use a GO process name, or the KEGG/Reactome skills | `[pathway]` |
+| Chromosome / band | `17[chr]` · `17q21[MV]` | `17q21[chromosome]` (0) |
+| Organism | `human[orgn]` or `txid9606[orgn]` | `9606[taxid]` |
+| Live protein-coding genes | `alive[prop] AND genetype_protein_coding[prop]` (human: 20,600) | `protein coding[gene type]` (0) |
+| Genes with ClinVar records | `gene_clinvar[filter]` | `has variants[filter]` (0) |
+
+When adding a new tag, compare its count with the same term under `[ALL]` and under a made-up tag — equal
+counts mean the tag was ignored.
 
 ### API Access Patterns
 
@@ -109,7 +144,7 @@ Query NCBI Gene using E-utilities (ESearch, ESummary, EFetch).
 ```bash
 python scripts/query_gene.py --search "BRCA1" --organism "human"
 python scripts/query_gene.py --id 672 --format json
-python scripts/query_gene.py --search "insulin[gene] AND diabetes[disease]"
+python scripts/query_gene.py --search 'INS[pref] AND "diabetes"[dis] AND human[orgn]'
 ```
 
 ### fetch_gene_data.py

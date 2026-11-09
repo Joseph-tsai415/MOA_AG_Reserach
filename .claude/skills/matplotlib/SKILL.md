@@ -247,6 +247,56 @@ ax.set_ylabel('Y Label')
 ax.set_zlabel('Z Label')
 ```
 
+### 7. Chinese (CJK) Labels and Missing Glyphs
+
+A glyph missing from the active font renders as an empty box ("tofu"). matplotlib only emits a
+`UserWarning: Glyph ... missing from font(s)`, so a script that suppresses warnings ships a broken figure,
+and text extraction cannot detect it. Typical traps: a CJK font alone lacks `✔` and `⚠`; DejaVu Sans
+alone lacks every Chinese character.
+
+Use a font **list** — matplotlib ≥ 3.6 falls back glyph by glyph — and fail the save on any missing glyph:
+
+```python
+import warnings
+import matplotlib.pyplot as plt
+from matplotlib import font_manager as fm
+
+CJK_CANDIDATES = ["Microsoft JhengHei", "Noto Sans TC", "Noto Sans CJK TC", "PingFang TC",   # Traditional
+                  "Microsoft YaHei", "Noto Sans SC", "Noto Sans CJK SC", "SimHei"]          # Simplified
+
+def use_cjk_font(prefer=CJK_CANDIDATES):
+    installed = {f.name for f in fm.fontManager.ttflist}
+    cjk = next((n for n in prefer if n in installed), None)
+    if cjk is None:
+        raise RuntimeError("no CJK font installed: Chinese labels would render as empty boxes")
+    plt.rcParams["font.family"] = ["DejaVu Sans", cjk]   # Latin + symbols from DejaVu, CJK from cjk
+    return cjk
+
+def savefig_checked(fig, path, **kw):
+    """savefig that raises instead of silently writing tofu boxes."""
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        fig.savefig(path, **kw)
+    missing = sorted({str(x.message) for x in w if "missing from font" in str(x.message)})
+    if missing:
+        raise RuntimeError(f"{path}: {len(missing)} missing glyph(s): {missing[:3]}")
+    return path
+
+use_cjk_font()
+fig, ax = plt.subplots()
+ax.set_title("特應性皮膚炎 p ≤ 0.05 ✔ ⚠ −1.2")      # renders fully with the fallback list
+savefig_checked(fig, "figure.png", dpi=300, bbox_inches="tight")
+```
+
+Tested 2026-11 (matplotlib 3.10, Windows): `["Microsoft YaHei"]` alone → 2 missing glyphs (✔ ⚠);
+`["DejaVu Sans", "Microsoft JhengHei"]` → none. Linux containers usually have no CJK font: install one
+(Debian/Ubuntu: `fonts-noto-cjk`), then rebuild the font cache (see references/common_issues.md).
+Still open the PNG and look at it — a font can contain a glyph and still render the wrong one.
+
+**Figure completeness (this project's standing rule):** colour encoding a value needs a colorbar;
+colour encoding a category needs a legend; always `bbox_inches="tight"`; label both axes; read the PNG back.
+See `.claude/docs/instrument_gotchas.md` §3–4.
+
 ## Best Practices
 
 ### 1. Interface Selection
@@ -347,7 +397,7 @@ Matplotlib integrates well with:
 1. **Overlapping elements**: Use `constrained_layout=True` or `tight_layout()`
 2. **State confusion**: Use OO interface to avoid pyplot state machine issues
 3. **Memory issues with many figures**: Close figures explicitly with `plt.close(fig)`
-4. **Font warnings**: Install fonts or suppress warnings with `plt.rcParams['font.sans-serif']`
+4. **Font warnings**: never suppress `Glyph ... missing from font(s)` — it is the only signal of tofu boxes. Use a fallback font list and `savefig_checked` (section 7)
 5. **DPI confusion**: Remember that figsize is in inches, not pixels: `pixels = dpi * inches`
 
 ## Additional Resources

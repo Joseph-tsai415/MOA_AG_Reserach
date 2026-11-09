@@ -34,11 +34,36 @@ Search ClinVar using the web interface at https://www.ncbi.nlm.nih.gov/clinvar/
 
 **Common search patterns:**
 - By gene: `BRCA1[gene]`
-- By clinical significance: `pathogenic[CLNSIG]`
-- By condition: `breast cancer[disorder]`
-- By variant: `NM_000059.3:c.1310_1313del[variant name]`
+- By classification: `clinsig_pathogenic[prop]` (see the filter table below)
+- By condition: `"breast cancer"[dis]` (quote multi-word phrases)
+- By variant: `NM_000059.3:c.1310_1313del` (unfielded HGVS) or `rs113993960`
 - By chromosome: `13[chr]`
-- Combined: `BRCA1[gene] AND pathogenic[CLNSIG]`
+- Combined: `BRCA1[gene] AND clinsig_pathogenic[prop]`
+
+> **Field tags are not validated.** ESearch treats an unknown tag such as `[CLNSIG]`, `[RVSTAT]` or
+> `[disorder]` as **All Fields** — no error, empty `fieldsnotfound`. `pathogenic[CLNSIG]` therefore matches the
+> word *pathogenic* anywhere (Likely pathogenic, "Conflicting classifications of pathogenicity", submitter text):
+> CFTR gives **2,322** hits versus **1,295** with the real filter `clinsig_pathogenic[prop]` (FLG: 341 vs 221).
+> The inflated count looks plausible, so nothing flags it. Use only tags from
+> `einfo.fcgi?db=clinvar` (`GENE, DIS, PROP, RVST, VRNM, CHR, MIM, HGNC, ...`) and the `clinsig_*` / `[prop]`
+> filters below; when adding a new tag, compare its count against a known property filter.
+
+| Filter | Query term (verified 2026-11) | CFTR count |
+|---|---|---|
+| Pathogenic | `clinsig_pathogenic[prop]` | 1,295 |
+| Likely pathogenic | `clinsig_likely_pathogenic[prop]` | 689 |
+| Uncertain significance | `clinsig_vus[prop]` | 2,622 |
+| Likely benign / Benign | `clinsig_likely_benign[prop]` / `clinsig_benign[prop]` | 1,641 / 113 |
+| Has conflicting classifications | `clinsig_has_conflicts[prop]` | 414 |
+| Review status (quote the phrase) | `"practice guideline"[RVST]`, `"reviewed by expert panel"[RVST]`, `"criteria provided, multiple submitters, no conflicts"[RVST]`, `"criteria provided, single submitter"[RVST]`, `"no assertion criteria provided"[RVST]` | 23 / 396 / 1,805 / 3,486 / 368 |
+| Condition (quote the phrase) | `"cystic fibrosis"[dis]` — unquoted `breast cancer[dis]` returns 0 | |
+| Gene | `CFTR[gene]` or HGNC number `1884[HGNC]` | |
+| Variant | unfielded HGVS `NM_000059.3:c.1310_1313del`, `rs113993960`, `VCV000007105`, or `Phe508del[vrnm] AND CFTR[gene]` | |
+
+**esummary field names changed (2024 classification split).** The summary no longer has
+`clinical_significance`; it has `germline_classification` (`description`, `review_status`, `last_evaluated`,
+`trait_set`), `clinical_impact_classification` (somatic) and `oncogenicity_classification`. Code that reads
+`clinical_significance` gets `None` for every record.
 
 #### Programmatic Access via E-utilities
 
@@ -51,7 +76,7 @@ Access ClinVar programmatically using NCBI's E-utilities API. Refer to `referenc
 **Quick example using curl:**
 ```bash
 # Search for pathogenic BRCA1 variants
-curl "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=clinvar&term=BRCA1[gene]+AND+pathogenic[CLNSIG]&retmode=json"
+curl "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=clinvar&term=BRCA1[gene]+AND+clinsig_pathogenic[prop]&retmode=json"
 ```
 
 **Best practices:**
@@ -214,7 +239,7 @@ When multiple submitters provide different classifications for the same variant,
 
 **Search query to exclude conflicts:**
 ```
-TP53[gene] AND pathogenic[CLNSIG] NOT conflicting[RVSTAT]
+TP53[gene] AND clinsig_pathogenic[prop] NOT clinsig_has_conflicts[prop]
 ```
 
 ### 6. Track Classification Updates
@@ -258,7 +283,7 @@ Contact: clinvar@ncbi.nlm.nih.gov for submission account setup.
 **Steps:**
 1. Search using web interface or E-utilities:
    ```
-   CFTR[gene] AND pathogenic[CLNSIG] AND (reviewed by expert panel[RVSTAT] OR practice guideline[RVSTAT])
+   CFTR[gene] AND clinsig_pathogenic[prop] AND ("reviewed by expert panel"[RVST] OR "practice guideline"[RVST])
    ```
 2. Review results, noting review status (should be ★★★ or ★★★★)
 3. Export variant list or retrieve full records via efetch
@@ -271,8 +296,8 @@ Contact: clinvar@ncbi.nlm.nih.gov for submission account setup.
 **Steps:**
 1. Download appropriate ClinVar VCF (match genome build: GRCh37 or GRCh38):
    ```bash
-   wget ftp://ftp.ncbi.nlm.nih.gov/pub/clinvar/vcf_GRCh38/clinvar.vcf.gz
-   wget ftp://ftp.ncbi.nlm.nih.gov/pub/clinvar/vcf_GRCh38/clinvar.vcf.gz.tbi
+   wget https://ftp.ncbi.nlm.nih.gov/pub/clinvar/vcf_GRCh38/clinvar.vcf.gz
+   wget https://ftp.ncbi.nlm.nih.gov/pub/clinvar/vcf_GRCh38/clinvar.vcf.gz.tbi
    ```
 2. Annotate using bcftools:
    ```bash
@@ -293,7 +318,7 @@ Contact: clinvar@ncbi.nlm.nih.gov for submission account setup.
 **Steps:**
 1. Search by condition:
    ```
-   hereditary breast cancer[disorder] OR "Breast-ovarian cancer, familial"[disorder]
+   "hereditary breast ovarian cancer syndrome"[dis] OR "Breast-ovarian cancer, familial"[dis]
    ```
 2. Download results as CSV or retrieve via E-utilities
 3. Filter by review status to prioritize high-confidence variants

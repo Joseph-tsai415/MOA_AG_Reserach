@@ -198,16 +198,17 @@ ax.hexbin(x, y, gridsize=50, cmap='viridis')
 from matplotlib.font_manager import findfont, FontProperties
 print(findfont(FontProperties(family='sans-serif')))
 
-# Solution 2: Rebuild font cache
-import matplotlib.font_manager
-matplotlib.font_manager._rebuild()
+# Solution 2: Rebuild the font cache after installing fonts
+# (font_manager._rebuild() was removed in matplotlib 3.6+; it raises AttributeError)
+from matplotlib import font_manager as fm
+fm.fontManager = fm._load_fontmanager(try_read_cache=False)
+# or delete the fontlist-*.json file in matplotlib.get_cachedir() and restart Python
 
-# Solution 3: Suppress warnings
-import warnings
-warnings.filterwarnings("ignore", category=UserWarning)
+# Solution 3: Specify a fallback list (matplotlib >= 3.6 falls back per glyph)
+plt.rcParams['font.family'] = ['DejaVu Sans', 'Microsoft JhengHei']   # e.g. Latin + Chinese
 
-# Solution 4: Specify fallback fonts
-plt.rcParams['font.sans-serif'] = ['Arial', 'DejaVu Sans', 'sans-serif']
+# Do NOT blanket-suppress UserWarning: "Glyph ... missing from font(s)" is the only signal that a
+# label rendered as empty boxes. See SKILL.md section 7 (use_cjk_font / savefig_checked).
 ```
 
 ### Issue: LaTeX Rendering Errors

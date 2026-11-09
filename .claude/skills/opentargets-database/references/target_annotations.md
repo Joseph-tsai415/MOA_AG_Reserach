@@ -1,5 +1,8 @@
 # Target Annotations and Features
 
+> **Schema note (verified against API 26.09, 2026-11):** `page:` needs `{index, size}`; `datatypeScores { id score }` (not `componentId`); `evidences(datasourceIds:)` (no `datatypes:`); `knownDrugs` → `drugAndClinicalCandidates`; `maximumClinicalTrialPhase` → `maximumClinicalStage`; `expressions` → `baselineExpression`. Most disease IDs are now `MONDO_…` and an obsolete ID returns `null` silently. `scripts/query_opentargets.py` holds working queries; check any field here against the schema browser before relying on it.
+
+
 ## Overview
 
 Open Targets defines a target as "any naturally-occurring molecule that can be targeted by a medicinal product." Targets are primarily protein-coding genes identified by Ensembl gene IDs, but also include RNAs and pseudogenes from canonical chromosomes.
@@ -295,42 +298,48 @@ query = """
       safetyLiabilities {
         event
         effects {
+          direction
           dosing
-          organsAffected
+        }
+        biosamples {
+          tissueLabel
         }
       }
 
-      # Expression
-      expressions {
-        tissue {
-          label
-        }
-        rna {
-          value
-          level
-        }
-        protein {
-          level
+      # Expression (baselineExpression replaced expressions; one row per tissue/cell-type x datasource)
+      baselineExpression(page: {index: 0, size: 50}) {
+        count
+        rows {
+          datasourceId
+          datatypeId
+          unit
+          median
+          specificity_score
+          tissueBiosampleFromSource
+          celltypeBiosampleFromSource
         }
       }
 
       # Chemical probes
       chemicalProbes {
         id
-        probeminer
+        drugId
+        isHighQuality
+        probesDrugsScore
+        scoreInCells
         origin
+        mechanismOfAction
       }
 
-      # Known drugs
-      knownDrugs {
-        uniqueDrugs
+      # Drugs and clinical candidates
+      drugAndClinicalCandidates {
+        count
         rows {
+          maxClinicalStage
           drug {
             name
-            maximumClinicalTrialPhase
+            maximumClinicalStage
           }
-          phase
-          status
         }
       }
 

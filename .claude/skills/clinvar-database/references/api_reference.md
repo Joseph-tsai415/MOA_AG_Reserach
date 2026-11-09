@@ -35,16 +35,21 @@ https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi
 **Example Query:**
 ```bash
 # Search for BRCA1 pathogenic variants
-curl "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=clinvar&term=BRCA1[gene]+AND+pathogenic[CLNSIG]&retmode=json&retmax=100"
+curl "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=clinvar&term=BRCA1[gene]+AND+clinsig_pathogenic[prop]&retmode=json&retmax=100"
 ```
 
 **Common Search Fields:**
-- `[gene]` - Gene symbol
-- `[CLNSIG]` - Clinical significance (pathogenic, benign, etc.)
-- `[disorder]` - Disease/condition name
-- `[variant name]` - HGVS expression or variant identifier
+- `[gene]` - Gene symbol; `[HGNC]` - HGNC number (e.g. `1884[HGNC]` = CFTR)
+- `clinsig_pathogenic[prop]`, `clinsig_likely_pathogenic[prop]`, `clinsig_vus[prop]`, `clinsig_likely_benign[prop]`,
+  `clinsig_benign[prop]`, `clinsig_has_conflicts[prop]` - classification filters
+- `"..."[RVST]` - Review status phrase, quoted (e.g. `"reviewed by expert panel"[RVST]`)
+- `"..."[dis]` - Disease/phenotype phrase, quoted
+- `[vrnm]` - Variant name (or search an HGVS string / rsID / VCV accession unfielded)
 - `[chr]` - Chromosome number
-- `[Assembly]` - GRCh37 or GRCh38
+
+**Unknown tags fail silently.** `[CLNSIG]`, `[RVSTAT]`, `[disorder]` and `[Assembly]` are not ClinVar fields; ESearch
+quietly searches All Fields instead, inflating counts (CFTR `pathogenic[CLNSIG]` = 2,322 vs `clinsig_pathogenic[prop]`
+= 1,295). The valid list is `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/einfo.fcgi?db=clinvar&retmode=json`.
 
 #### 2. esummary - Retrieve Record Summaries
 Get summary information for specific ClinVar records.
@@ -67,9 +72,10 @@ curl "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=clinvar&id=
 ```
 
 **esummary Output Includes:**
-- Accession (RCV/VCV)
-- Clinical significance
-- Review status
+- Accession (VCV) and `title` (HGVS name)
+- `germline_classification` {`description`, `review_status`, `last_evaluated`, `trait_set`}
+  (there is no `clinical_significance` key any more; somatic calls are in `clinical_impact_classification`
+  and `oncogenicity_classification`)
 - Gene symbols
 - Variant type
 - Genomic locations (GRCh37 and GRCh38)
@@ -119,7 +125,7 @@ curl "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/elink.fcgi?dbfrom=clinvar&db
 
 ```bash
 # Step 1: Search for variants
-SEARCH_URL="https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=clinvar&term=CFTR[gene]+AND+pathogenic[CLNSIG]&retmode=json&retmax=10"
+SEARCH_URL="https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=clinvar&term=CFTR[gene]+AND+clinsig_pathogenic[prop]&retmode=json&retmax=10"
 
 # Step 2: Parse IDs from search results
 # (Extract id list from JSON response)
@@ -142,7 +148,7 @@ sh -c "$(curl -fsSL ftp://ftp.ncbi.nlm.nih.gov/entrez/entrezdirect/install-edire
 
 **Search:**
 ```bash
-esearch -db clinvar -query "BRCA1[gene] AND pathogenic[CLNSIG]"
+esearch -db clinvar -query "BRCA1[gene] AND clinsig_pathogenic[prop]"
 ```
 
 **Pipeline Search to Summary:**
@@ -154,7 +160,7 @@ esearch -db clinvar -query "TP53[gene]" | \
 
 **Count Results:**
 ```bash
-esearch -db clinvar -query "breast cancer[disorder]" | \
+esearch -db clinvar -query '"breast cancer"[dis]' | \
   efilter -status reviewed | \
   efetch -format docsum
 ```
@@ -194,17 +200,21 @@ def search_clinvar(query, retmax=100):
     handle.close()
     return record["IdList"]
 
-# Get summaries
+# Get summaries. Entrez.read() parses XML only; with retmode="json" it raises NotXMLError,
+# so read JSON with json.loads instead.
+import json
+
 def get_summaries(id_list):
-    ids = ",".join(id_list)
-    handle = Entrez.esummary(db="clinvar", id=ids, retmode="json")
-    record = Entrez.read(handle)
+    handle = Entrez.esummary(db="clinvar", id=",".join(id_list), retmode="json")
+    result = json.loads(handle.read())["result"]
     handle.close()
-    return record
+    return [result[i] for i in result["uids"]]
 
 # Example usage
-variant_ids = search_clinvar("BRCA2[gene] AND pathogenic[CLNSIG]")
-summaries = get_summaries(variant_ids)
+variant_ids = search_clinvar("BRCA2[gene] AND clinsig_pathogenic[prop]")
+for s in get_summaries(variant_ids[:20]):
+    gc = s["germline_classification"]
+    print(s["accession"], s["title"], gc["description"], "|", gc["review_status"])
 ```
 
 ## Error Handling

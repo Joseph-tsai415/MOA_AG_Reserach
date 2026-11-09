@@ -34,14 +34,14 @@ This skill should be used when queries involve:
 The GWAS Catalog is organized around four core entities:
 
 - **Studies**: GWAS publications with metadata (PMID, author, cohort details)
-- **Associations**: SNP-trait associations with statistical evidence (p ≤ 5×10⁻⁸)
+- **Associations**: SNP-trait associations as published (most p ≤ 5×10⁻⁸; suggestive hits down to ~1×10⁻⁵ are also curated, so filter yourself)
 - **Variants**: Genetic markers (SNPs) with genomic coordinates and alleles
 - **Traits**: Phenotypes and diseases (mapped to EFO ontology terms)
 
 **Key Identifiers:**
 - Study accessions: `GCST` IDs (e.g., GCST001234)
 - Variant IDs: `rs` numbers (e.g., rs7903146) or `variant_id` format
-- Trait IDs: EFO terms (e.g., EFO_0001360 for type 2 diabetes)
+- Trait IDs: EFO **or MONDO** terms. Many diseases moved to MONDO (type 2 diabetes `MONDO_0005148`, atopic eczema `MONDO_0004980`); the field is still called `efo_id`.
 - Gene symbols: HGNC approved names (e.g., TCF7L2)
 
 ### 2. Web Interface Searches
@@ -83,374 +83,116 @@ GCST001234
 ```
 Returns study details and all reported associations.
 
-### 3. REST API Access
+### 3. REST API v2 (the only live API)
 
-The GWAS Catalog provides two REST APIs for programmatic access:
+> **v1 and the Summary Statistics API are gone.** Every v1 URL (`/gwas/rest/api/efoTraits/...`,
+> `/singleNucleotidePolymorphisms/...`, `/studies/...`) and `https://www.ebi.ac.uk/gwas/summary-statistics/api`
+> return **HTTP 410 Gone**. Use `https://www.ebi.ac.uk/gwas/rest/api/v2` (docs: https://www.ebi.ac.uk/gwas/rest/api/v2/docs).
+> v2 field names are snake_case (`p_value`, `mapped_genes`, `accession_id`), not v1 camelCase (`pvalue`, `rsId`).
 
-**Base URLs:**
-- GWAS Catalog API: `https://www.ebi.ac.uk/gwas/rest/api`
-- Summary Statistics API: `https://www.ebi.ac.uk/gwas/summary-statistics/api`
+`scripts/gwas_v2.py` wraps it (retries, pagination, completeness assertion, exact p-values). Run
+`python scripts/gwas_v2.py` for the known-answer smoke test.
 
-**API Documentation:**
-- Main API docs: https://www.ebi.ac.uk/gwas/rest/docs/api
-- Summary stats docs: https://www.ebi.ac.uk/gwas/summary-statistics/docs/
+| Need | v2 call (verified 2026-11) |
+|---|---|
+| Trait name → current ID | `GET /efo-traits?efo_trait=atopic eczema` → `MONDO_0004980` |
+| Trait record | `GET /efo-traits/{id}` (404 = obsolete or unknown ID) |
+| Associations for a trait | `GET /associations?efo_id=MONDO_0004980&sort=p_value&direction=asc&size=500&page=0` |
+| Associations for a variant | `GET /associations?rs_id=rs7903146` |
+| Associations by mapped gene | `GET /associations?mapped_gene=FLG` |
+| Associations from a paper | `GET /associations?pubmed_id=37794016` |
+| Variant record | `GET /single-nucleotide-polymorphisms/rs7903146` → `mapped_genes: ["TCF7L2"]` |
+| Study record / studies for a trait | `GET /studies/GCST001795` · `GET /studies?efo_id=MONDO_0004980` |
+| Gene record | `GET /genes/FLG` |
 
-**Core Endpoints:**
+`/single-nucleotide-polymorphisms/{rs}/associations` is **404** in v2; use `/associations?rs_id=`.
+Responses are HAL: rows under `_embedded.<collection>`, paging under `page.{totalElements,totalPages,number}`.
 
-1. **Studies endpoint** - `/studies/{accessionID}`
-   ```python
-   import requests
+### 4. Two silent-zero traps
 
-   # Get a specific study
-   url = "https://www.ebi.ac.uk/gwas/rest/api/studies/GCST001795"
-   response = requests.get(url, headers={"Content-Type": "application/json"})
-   study = response.json()
-   ```
+1. **Obsolete trait IDs return HTTP 200 with zero rows.** `associations?efo_id=EFO_0000274` (the old atopic
+   dermatitis ID) gives `totalElements: 0`; `MONDO_0004980` gives 796. Always resolve the trait by **name**
+   first and record the resolved ID. A zero for a well-studied disease is a broken query, not missing genetics.
+2. **`p_value` underflows to `0.0`** for very strong hits (TCF7L2 in T2D: `p_value: 0.0`, true −log10 p ≈ 1314).
+   Rank and threshold on `pvalue_mantissa` × 10^`pvalue_exponent`; `gwas_v2.neg_log10_p()` does this.
 
-2. **Associations endpoint** - `/associations`
-   ```python
-   # Find associations for a variant
-   variant = "rs7903146"
-   url = f"https://www.ebi.ac.uk/gwas/rest/api/singleNucleotidePolymorphisms/{variant}/associations"
-   params = {"projection": "associationBySnp"}
-   response = requests.get(url, params=params, headers={"Content-Type": "application/json"})
-   associations = response.json()
-   ```
+### 5. Query examples
 
-3. **Variants endpoint** - `/singleNucleotidePolymorphisms/{rsID}`
-   ```python
-   # Get variant details
-   url = "https://www.ebi.ac.uk/gwas/rest/api/singleNucleotidePolymorphisms/rs7903146"
-   response = requests.get(url, headers={"Content-Type": "application/json"})
-   variant_info = response.json()
-   ```
-
-4. **Traits endpoint** - `/efoTraits/{efoID}`
-   ```python
-   # Get trait information
-   url = "https://www.ebi.ac.uk/gwas/rest/api/efoTraits/EFO_0001360"
-   response = requests.get(url, headers={"Content-Type": "application/json"})
-   trait_info = response.json()
-   ```
-
-### 4. Query Examples and Patterns
-
-**Example 1: Find all associations for a disease**
 ```python
-import requests
+import sys; sys.path.insert(0, "scripts")
+import gwas_v2 as gw
 
-trait = "EFO_0001360"  # Type 2 diabetes
-base_url = "https://www.ebi.ac.uk/gwas/rest/api"
+trait = gw.resolve_trait("atopic eczema")[0]          # {'efo_id': 'MONDO_0004980', 'efo_trait': 'atopic eczema', ...}
+assoc = gw.get_associations(efo_id=trait["efo_id"])   # all 796, best p first; asserts len == totalElements
+genes = gw.genes_from_associations(assoc)             # {gene: {n_assoc, n_gws, best_neg_log10_p, top_snp, studies, pmids}}
+genes["FLG"]["n_gws"], genes["IL13"]["n_gws"]         # 8, 14
 
-# Query associations for this trait
-url = f"{base_url}/efoTraits/{trait}/associations"
-response = requests.get(url, headers={"Content-Type": "application/json"})
-associations = response.json()
-
-# Process results
-for assoc in associations.get('_embedded', {}).get('associations', []):
-    variant = assoc.get('rsId')
-    pvalue = assoc.get('pvalue')
-    risk_allele = assoc.get('strongestAllele')
-    print(f"{variant}: p={pvalue}, risk allele={risk_allele}")
+gw.get_variant("rs7903146")["mapped_genes"]           # ['TCF7L2']
+gw.get_associations(rs_id="rs7903146", max_records=50)   # pleiotropy: every trait for one SNP
+gw.get_study("GCST001795")["initial_sample_size"]
 ```
 
-**Example 2: Get variant information and all trait associations**
-```python
-import requests
+One association record (abridged):
 
-variant = "rs7903146"
-base_url = "https://www.ebi.ac.uk/gwas/rest/api"
-
-# Get variant details
-url = f"{base_url}/singleNucleotidePolymorphisms/{variant}"
-response = requests.get(url, headers={"Content-Type": "application/json"})
-variant_data = response.json()
-
-# Get all associations for this variant
-url = f"{base_url}/singleNucleotidePolymorphisms/{variant}/associations"
-params = {"projection": "associationBySnp"}
-response = requests.get(url, params=params, headers={"Content-Type": "application/json"})
-associations = response.json()
-
-# Extract trait names and p-values
-for assoc in associations.get('_embedded', {}).get('associations', []):
-    trait = assoc.get('efoTrait')
-    pvalue = assoc.get('pvalue')
-    print(f"Trait: {trait}, p-value: {pvalue}")
+```json
+{"association_id": 118712324, "p_value": 1e-228, "pvalue_mantissa": 1, "pvalue_exponent": -228,
+ "efo_traits": [{"efo_id": "MONDO_0004980", "efo_trait": "atopic eczema"}], "reported_trait": ["Atopic dermatitis"],
+ "mapped_genes": ["CCDST"], "snp_allele": [{"rs_id": "rs12123821", "effect_allele": "T"}],
+ "or_value": "1.27", "ci_lower": 1.25, "ci_upper": 1.29, "beta": "-", "risk_frequency": "0.05",
+ "accession_id": "GCST90244787", "pubmed_id": "37794016", "first_author": "Budu-Aggrey A", "locations": ["1:152206676"]}
 ```
 
-**Example 3: Access summary statistics**
-```python
-import requests
+**Mapped genes are not all protein targets.** The top atopic-dermatitis loci map to `CCDST`, `LINC01527` and
+`TH2LCRR` (lncRNAs) and to read-throughs such as `RTEL1-TNFRSF6B`. Before intersecting with a drug-target list,
+normalise symbols to HGNC, keep protein-coding genes, and report how many mapped genes were dropped. A mapped
+gene is the nearest or overlapping gene, not a proven causal gene; use Open Targets L2G or credible sets for
+causal-gene assignment.
 
-# Query summary statistics API
-base_url = "https://www.ebi.ac.uk/gwas/summary-statistics/api"
+### 6. Summary statistics
 
-# Find associations by trait with p-value threshold
-trait = "EFO_0001360"  # Type 2 diabetes
-p_upper = "0.000000001"  # p < 1e-9
-url = f"{base_url}/traits/{trait}/associations"
-params = {
-    "p_upper": p_upper,
-    "size": 100  # Number of results
-}
-response = requests.get(url, params=params)
-results = response.json()
+Full summary statistics are **download only** (the query API is retired):
+`https://ftp.ebi.ac.uk/pub/databases/gwas/summary_statistics/` (per-study `GCSTxxxxxx/` folders, harmonised files
+where available). Access notes: https://www.ebi.ac.uk/gwas/docs/methods/summary-statistics. Bulk catalogue
+releases: `https://ftp.ebi.ac.uk/pub/databases/gwas/releases/latest/` and https://www.ebi.ac.uk/gwas/docs/file-downloads.
 
-# Process genome-wide significant hits
-for hit in results.get('_embedded', {}).get('associations', []):
-    variant_id = hit.get('variant_id')
-    chromosome = hit.get('chromosome')
-    position = hit.get('base_pair_location')
-    pvalue = hit.get('p_value')
-    print(f"{chromosome}:{position} ({variant_id}): p={pvalue}")
-```
+### 7. Cross-referencing
 
-**Example 4: Query by chromosomal region**
-```python
-import requests
-
-# Find variants in a specific genomic region
-chromosome = "10"
-start_pos = 114000000
-end_pos = 115000000
-
-base_url = "https://www.ebi.ac.uk/gwas/rest/api"
-url = f"{base_url}/singleNucleotidePolymorphisms/search/findByChromBpLocationRange"
-params = {
-    "chrom": chromosome,
-    "bpStart": start_pos,
-    "bpEnd": end_pos
-}
-response = requests.get(url, params=params, headers={"Content-Type": "application/json"})
-variants_in_region = response.json()
-```
-
-### 5. Working with Summary Statistics
-
-The GWAS Catalog hosts full summary statistics for many studies, providing access to all tested variants (not just genome-wide significant hits).
-
-**Access Methods:**
-1. **FTP download**: http://ftp.ebi.ac.uk/pub/databases/gwas/summary_statistics/
-2. **REST API**: Query-based access to summary statistics
-3. **Web interface**: Browse and download via the website
-
-**Summary Statistics API Features:**
-- Filter by chromosome, position, p-value
-- Query specific variants across studies
-- Retrieve effect sizes and allele frequencies
-- Access harmonized and standardized data
-
-**Example: Download summary statistics for a study**
-```python
-import requests
-import gzip
-
-# Get available summary statistics
-base_url = "https://www.ebi.ac.uk/gwas/summary-statistics/api"
-url = f"{base_url}/studies/GCST001234"
-response = requests.get(url)
-study_info = response.json()
-
-# Download link is provided in the response
-# Alternatively, use FTP:
-# ftp://ftp.ebi.ac.uk/pub/databases/gwas/summary_statistics/GCSTXXXXXX/
-```
-
-### 6. Data Integration and Cross-referencing
-
-The GWAS Catalog provides links to external resources:
-
-**Genomic Databases:**
-- Ensembl: Gene annotations and variant consequences
-- dbSNP: Variant identifiers and population frequencies
-- gnomAD: Population allele frequencies
-
-**Functional Resources:**
-- Open Targets: Target-disease associations
-- PGS Catalog: Polygenic risk scores
-- UCSC Genome Browser: Genomic context
-
-**Phenotype Resources:**
-- EFO (Experimental Factor Ontology): Standardized trait terms
-- OMIM: Disease gene relationships
-- Disease Ontology: Disease hierarchies
-
-**Following Links in API Responses:**
-```python
-import requests
-
-# API responses include _links for related resources
-response = requests.get("https://www.ebi.ac.uk/gwas/rest/api/studies/GCST001234")
-study = response.json()
-
-# Follow link to associations
-associations_url = study['_links']['associations']['href']
-associations_response = requests.get(associations_url)
-```
+- Ensembl / dbSNP / gnomAD for variant consequence and frequency
+- Open Targets for locus-to-gene (L2G) and target–disease scores
+- PGS Catalog for polygenic scores built on these associations
 
 ## Query Workflows
 
-### Workflow 1: Exploring Genetic Associations for a Disease
+### Workflow 1: Genetic evidence for a disease (MOA pipeline, Step 2)
 
-1. **Identify the trait** using EFO terms or free text:
-   - Search web interface for disease name
-   - Note the EFO ID (e.g., EFO_0001360 for type 2 diabetes)
+1. `resolve_trait("<disease name>")` → record the resolved ID **and** the access date.
+2. `get_associations(efo_id=...)` → all rows; completeness is asserted.
+3. Filter genome-wide significance on `neg_log10_p() >= 7.3`, never on `p_value`.
+4. `genes_from_associations()` → per-gene `n_gws`, best p, PMIDs; normalise to HGNC protein-coding.
+5. Known-answer control: a gene that must be present (FLG or IL13 for atopic dermatitis, TCF7L2 for T2D,
+   FTO/MC4R for obesity). If it is absent, or the trait returns 0 rows, mark the source `FETCH_FAILED`.
 
-2. **Query associations via API:**
-   ```python
-   url = f"https://www.ebi.ac.uk/gwas/rest/api/efoTraits/{efo_id}/associations"
-   ```
+### Workflow 2: One variant across traits (pleiotropy)
 
-3. **Filter by significance and population:**
-   - Check p-values (genome-wide significant: p ≤ 5×10⁻⁸)
-   - Review ancestry information in study metadata
-   - Filter by sample size or discovery/replication status
+`get_variant(rs)` for location and mapped genes, then `get_associations(rs_id=rs)` for every trait. Compare
+effect alleles before comparing directions.
 
-4. **Extract variant details:**
-   - rs IDs for each association
-   - Effect alleles and directions
-   - Effect sizes (odds ratios, beta coefficients)
-   - Population allele frequencies
+### Workflow 3: One gene across traits
 
-5. **Cross-reference with other databases:**
-   - Look up variant consequences in Ensembl
-   - Check population frequencies in gnomAD
-   - Explore gene function and pathways
+`get_associations(mapped_gene="FLG")` lists every curated association whose mapped genes include the symbol.
+This is proximity-based mapping, not proof that the gene drives the association.
 
-### Workflow 2: Investigating a Specific Genetic Variant
+### Workflow 4: Systematic review of genetic evidence
 
-1. **Query the variant:**
-   ```python
-   url = f"https://www.ebi.ac.uk/gwas/rest/api/singleNucleotidePolymorphisms/{rs_id}"
-   ```
-
-2. **Retrieve all trait associations:**
-   ```python
-   url = f"https://www.ebi.ac.uk/gwas/rest/api/singleNucleotidePolymorphisms/{rs_id}/associations"
-   ```
-
-3. **Analyze pleiotropy:**
-   - Identify all traits associated with this variant
-   - Review effect directions across traits
-   - Look for shared biological pathways
-
-4. **Check genomic context:**
-   - Determine nearby genes
-   - Identify if variant is in coding/regulatory regions
-   - Review linkage disequilibrium with other variants
-
-### Workflow 3: Gene-Centric Association Analysis
-
-1. **Search by gene symbol** in web interface or:
-   ```python
-   url = f"https://www.ebi.ac.uk/gwas/rest/api/singleNucleotidePolymorphisms/search/findByGene"
-   params = {"geneName": gene_symbol}
-   ```
-
-2. **Retrieve variants in gene region:**
-   - Get chromosomal coordinates for gene
-   - Query variants in region
-   - Include promoter and regulatory regions (extend boundaries)
-
-3. **Analyze association patterns:**
-   - Identify traits associated with variants in this gene
-   - Look for consistent associations across studies
-   - Review effect sizes and directions
-
-4. **Functional interpretation:**
-   - Determine variant consequences (missense, regulatory, etc.)
-   - Check expression QTL (eQTL) data
-   - Review pathway and network context
-
-### Workflow 4: Systematic Review of Genetic Evidence
-
-1. **Define research question:**
-   - Specific trait or disease of interest
-   - Population considerations
-   - Study design requirements
-
-2. **Comprehensive variant extraction:**
-   - Query all associations for trait
-   - Set significance threshold
-   - Note discovery and replication studies
-
-3. **Quality assessment:**
-   - Review study sample sizes
-   - Check for population diversity
-   - Assess heterogeneity across studies
-   - Identify potential biases
-
-4. **Data synthesis:**
-   - Aggregate associations across studies
-   - Perform meta-analysis if applicable
-   - Create summary tables
-   - Generate Manhattan or forest plots
-
-5. **Export and documentation:**
-   - Download full association data
-   - Export summary statistics if needed
-   - Document search strategy and date
-   - Create reproducible analysis scripts
-
-### Workflow 5: Accessing and Analyzing Summary Statistics
-
-1. **Identify studies with summary statistics:**
-   - Browse summary statistics portal
-   - Check FTP directory listings
-   - Query API for available studies
-
-2. **Download summary statistics:**
-   ```bash
-   # Via FTP
-   wget ftp://ftp.ebi.ac.uk/pub/databases/gwas/summary_statistics/GCSTXXXXXX/harmonised/GCSTXXXXXX-harmonised.tsv.gz
-   ```
-
-3. **Query via API for specific variants:**
-   ```python
-   url = f"https://www.ebi.ac.uk/gwas/summary-statistics/api/chromosomes/{chrom}/associations"
-   params = {"start": start_pos, "end": end_pos}
-   ```
-
-4. **Process and analyze:**
-   - Filter by p-value thresholds
-   - Extract effect sizes and confidence intervals
-   - Perform downstream analyses (fine-mapping, colocalization, etc.)
-
-## Response Formats and Data Fields
-
-**Key Fields in Association Records:**
-- `rsId`: Variant identifier (rs number)
-- `strongestAllele`: Risk allele for the association
-- `pvalue`: Association p-value
-- `pvalueText`: P-value as text (may include inequality)
-- `orPerCopyNum`: Odds ratio or beta coefficient
-- `betaNum`: Effect size (for quantitative traits)
-- `betaUnit`: Unit of measurement for beta
-- `range`: Confidence interval
-- `efoTrait`: Associated trait name
-- `mappedLabel`: EFO-mapped trait term
-
-**Study Metadata Fields:**
-- `accessionId`: GCST study identifier
-- `pubmedId`: PubMed ID
-- `author`: First author
-- `publicationDate`: Publication date
-- `ancestryInitial`: Discovery population ancestry
-- `ancestryReplication`: Replication population ancestry
-- `sampleSize`: Total sample size
-
-**Pagination:**
-Results are paginated (default 20 items per page). Navigate using:
-- `size` parameter: Number of results per page
-- `page` parameter: Page number (0-indexed)
-- `_links` in response: URLs for next/previous pages
+Pull all associations for the resolved trait, group by `accession_id` (study) and `pubmed_id`, record sample
+size and ancestry from `get_study()`, separate discovery from replication, and document the query, resolved
+trait ID and access date.
 
 ## Best Practices
 
+
 ### Query Strategy
-- Start with web interface to identify relevant EFO terms and study accessions
+- Resolve trait IDs by name through `/efo-traits?efo_trait=` (IDs migrate between EFO and MONDO)
 - Use API for bulk data extraction and automated analyses
 - Implement pagination handling for large result sets
 - Cache API responses to minimize redundant requests
@@ -465,7 +207,7 @@ Results are paginated (default 20 items per page). Navigate using:
 ### Rate Limiting and Ethics
 - Respect API usage guidelines (no excessive requests)
 - Use summary statistics downloads for genome-wide analyses
-- Implement appropriate delays between API calls
+- v2 is slow (tens of seconds for a large page) and occasionally drops connections; use timeouts of at least 180 s and retries (`gwas_v2._get` does both)
 - Cache results locally when performing iterative analyses
 - Cite the GWAS Catalog in publications
 
@@ -476,95 +218,14 @@ Results are paginated (default 20 items per page). Navigate using:
 - Check for study overlap when combining results
 - Be aware of ascertainment and selection biases
 
-## Python Integration Example
-
-Complete workflow for querying and analyzing GWAS data:
-
-```python
-import requests
-import pandas as pd
-from time import sleep
-
-def query_gwas_catalog(trait_id, p_threshold=5e-8):
-    """
-    Query GWAS Catalog for trait associations
-
-    Args:
-        trait_id: EFO trait identifier (e.g., 'EFO_0001360')
-        p_threshold: P-value threshold for filtering
-
-    Returns:
-        pandas DataFrame with association results
-    """
-    base_url = "https://www.ebi.ac.uk/gwas/rest/api"
-    url = f"{base_url}/efoTraits/{trait_id}/associations"
-
-    headers = {"Content-Type": "application/json"}
-    results = []
-    page = 0
-
-    while True:
-        params = {"page": page, "size": 100}
-        response = requests.get(url, params=params, headers=headers)
-
-        if response.status_code != 200:
-            break
-
-        data = response.json()
-        associations = data.get('_embedded', {}).get('associations', [])
-
-        if not associations:
-            break
-
-        for assoc in associations:
-            pvalue = assoc.get('pvalue')
-            if pvalue and float(pvalue) <= p_threshold:
-                results.append({
-                    'variant': assoc.get('rsId'),
-                    'pvalue': pvalue,
-                    'risk_allele': assoc.get('strongestAllele'),
-                    'or_beta': assoc.get('orPerCopyNum') or assoc.get('betaNum'),
-                    'trait': assoc.get('efoTrait'),
-                    'pubmed_id': assoc.get('pubmedId')
-                })
-
-        page += 1
-        sleep(0.1)  # Rate limiting
-
-    return pd.DataFrame(results)
-
-# Example usage
-df = query_gwas_catalog('EFO_0001360')  # Type 2 diabetes
-print(df.head())
-print(f"\nTotal associations: {len(df)}")
-print(f"Unique variants: {df['variant'].nunique()}")
-```
-
 ## Resources
 
+### scripts/gwas_v2.py
+`resolve_trait`, `get_associations`, `neg_log10_p`, `genes_from_associations`, `get_variant`, `get_study`,
+`get_studies_for_trait`. `python scripts/gwas_v2.py` runs the known-answer smoke test (atopic eczema, rs7903146, T2D).
+
 ### references/api_reference.md
-
-Comprehensive API documentation including:
-- Detailed endpoint specifications for both APIs
-- Complete list of query parameters and filters
-- Response format specifications and field descriptions
-- Advanced query examples and patterns
-- Error handling and troubleshooting
-- Integration with external databases
-
-Consult this reference when:
-- Constructing complex API queries
-- Understanding response structures
-- Implementing pagination or batch operations
-- Troubleshooting API errors
-- Exploring advanced filtering options
-
-### Training Materials
-
-The GWAS Catalog team provides workshop materials:
-- GitHub repository: https://github.com/EBISPOT/GWAS_Catalog-workshop
-- Jupyter notebooks with example queries
-- Google Colab integration for cloud execution
+v2 endpoint and field reference, with the v1 → v2 mapping.
 
 ## Important Notes
 
@@ -576,7 +237,8 @@ The GWAS Catalog team provides workshop materials:
 
 ### Citation Requirements
 When using GWAS Catalog data, cite:
-- Sollis E, et al. (2023) The NHGRI-EBI GWAS Catalog: knowledgebase and deposition resource. Nucleic Acids Research. PMID: 37953337
+- Cerezo M, et al. (2025) The NHGRI-EBI GWAS Catalog: standards for reusability, sustainability and diversity. Nucleic Acids Research 53(D1):D998-D1005. PMID: 39530240
+- Sollis E, et al. (2023) The NHGRI-EBI GWAS Catalog: knowledgebase and deposition resource. Nucleic Acids Research 51(D1):D977-D985. PMID: 36350656
 - Include access date and version when available
 - Cite original studies when discussing specific findings
 
@@ -589,18 +251,16 @@ When using GWAS Catalog data, cite:
 
 ### Data Access
 - Web interface: Free, no registration required
-- REST APIs: Free, no API key needed
+- REST API v2: Free, no API key needed
 - FTP downloads: Open access
 - Rate limiting applies to API (be respectful)
 
 ## Additional Resources
 
 - **GWAS Catalog website**: https://www.ebi.ac.uk/gwas/
-- **Documentation**: https://www.ebi.ac.uk/gwas/docs
-- **API documentation**: https://www.ebi.ac.uk/gwas/rest/docs/api
-- **Summary Statistics API**: https://www.ebi.ac.uk/gwas/summary-statistics/docs/
-- **FTP site**: http://ftp.ebi.ac.uk/pub/databases/gwas/
+- **REST API v2 docs**: https://www.ebi.ac.uk/gwas/rest/api/v2/docs
+- **Summary statistics access**: https://www.ebi.ac.uk/gwas/docs/methods/summary-statistics
+- **FTP (HTTPS)**: https://ftp.ebi.ac.uk/pub/databases/gwas/
 - **Training materials**: https://github.com/EBISPOT/GWAS_Catalog-workshop
 - **PGS Catalog** (polygenic scores): https://www.pgscatalog.org/
 - **Help and support**: gwas-info@ebi.ac.uk
-

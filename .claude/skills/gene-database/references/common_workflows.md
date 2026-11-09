@@ -25,14 +25,14 @@ Identify genes associated with a specific disease or phenotype.
 
 ```bash
 # Find genes associated with Alzheimer's disease
-python scripts/query_gene.py --search "Alzheimer disease[disease]" --organism human --max-results 50
+python scripts/query_gene.py --search '"Alzheimer disease"[dis]' --organism human --max-results 50
 ```
 
 2. **Filter by chromosome location**
 
 ```bash
 # Find genes on chromosome 17 associated with breast cancer
-python scripts/query_gene.py --search "breast cancer[disease] AND 17[chromosome]" --organism human
+python scripts/query_gene.py --search '"breast cancer"[dis] AND 17[chr]' --organism human
 ```
 
 3. **Retrieve detailed information**
@@ -43,7 +43,7 @@ import json
 from scripts.query_gene import esearch, esummary
 
 # Search for genes
-query = "diabetes[disease] AND human[organism]"
+query = '"diabetes"[dis] AND human[orgn]'
 gene_ids = esearch(query, retmax=100, api_key="YOUR_KEY")
 
 # Get summaries
@@ -188,14 +188,14 @@ Identify genes involved in specific biological pathways or processes.
 
 ```bash
 # Find genes involved in apoptosis
-python scripts/query_gene.py --search "GO:0006915[biological process]" --organism human --max-results 100
+python scripts/query_gene.py --search '"apoptotic process"[GO]' --organism human --max-results 100
 ```
 
 2. **Search by pathway name**
 
 ```bash
 # Find genes in insulin signaling pathway
-python scripts/query_gene.py --search "insulin signaling pathway[pathway]" --organism human
+python scripts/query_gene.py --search '"insulin receptor signaling pathway"[GO]' --organism human   # no [pathway] field exists
 ```
 
 3. **Get pathway-related genes**
@@ -206,7 +206,7 @@ import urllib.request
 import json
 
 # Search for pathway genes
-query = "MAPK signaling pathway[pathway] AND human[organism]"
+query = '"MAPK cascade"[GO] AND human[orgn]'   # [pathway] is not a field; use GO or the KEGG skill
 url = f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=gene&term={query}&retmode=json&retmax=200"
 
 with urllib.request.urlopen(url) as response:
@@ -243,8 +243,10 @@ Find genes with clinically relevant variants or disease-associated mutations.
 1. **Search for genes with clinical variants**
 
 ```bash
-# Find genes with pathogenic variants
-python scripts/query_gene.py --search "pathogenic[clinical significance]" --organism human --max-results 50
+# Genes that have ClinVar records. Gene has no clinical-significance field
+# (pathogenic[clinical significance] is silently searched as All Fields); filter by
+# classification in the clinvar-database skill (clinsig_pathogenic[prop]).
+python scripts/query_gene.py --search "gene_clinvar[filter]" --organism human --max-results 50
 ```
 
 2. **Link to ClinVar database**
@@ -257,8 +259,8 @@ curl "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/elink.fcgi?dbfrom=gene&db=cl
 3. **Search for pharmacogenomic genes**
 
 ```bash
-# Find genes associated with drug response
-python scripts/query_gene.py --search "pharmacogenomic[property]" --organism human
+# NCBI Gene has no pharmacogenomics filter (pharmacogenomic[property] returns 0).
+# Use the clinpgx-database skill (ClinPGx/PharmGKB) for gene-drug response annotations.
 ```
 
 4. **Get variant summary data**
@@ -268,7 +270,7 @@ python scripts/query_gene.py --search "pharmacogenomic[property]" --organism hum
 from scripts.query_gene import esearch, efetch
 
 # Search for genes with variants
-gene_ids = esearch("has variants[filter] AND human[organism]", retmax=100)
+gene_ids = esearch("gene_clinvar[filter] AND human[orgn]", retmax=100)   # genes with ClinVar records
 
 # Fetch detailed records
 for gene_id in gene_ids[:10]:  # First 10
@@ -311,8 +313,8 @@ curl "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/elink.fcgi?dbfrom=gene&db=pu
 3. **Search by author or journal**
 
 ```bash
-# Find genes studied by specific research group
-python scripts/query_gene.py --search "Smith J[author] AND 2024[pdat]" --organism human
+# NCBI Gene has no author field. Find the papers in PubMed first, then the genes linked to a PMID:
+python scripts/query_gene.py --search "16550169[PMID]" --organism human    # Palmer 2006 Nat Genet -> FLG
 ```
 
 4. **Extract gene-publication relationships**
@@ -358,13 +360,13 @@ print(f"Gene {gene_id} has {len(pmids)} publications")
 # Example: Find genes at intersection of multiple criteria
 def find_genes_multi_criteria(organism='human'):
     # Criteria 1: Disease association
-    disease_genes = set(esearch("diabetes[disease] AND human[organism]"))
+    disease_genes = set(esearch('"diabetes"[dis] AND human[orgn]'))
 
     # Criteria 2: Chromosome location
-    chr_genes = set(esearch("11[chromosome] AND human[organism]"))
+    chr_genes = set(esearch("11[chr] AND human[orgn]"))
 
     # Criteria 3: Gene type
-    coding_genes = set(esearch("protein coding[gene type] AND human[organism]"))
+    coding_genes = set(esearch("alive[prop] AND genetype_protein_coding[prop] AND human[orgn]"))
 
     # Intersection
     candidates = disease_genes & chr_genes & coding_genes

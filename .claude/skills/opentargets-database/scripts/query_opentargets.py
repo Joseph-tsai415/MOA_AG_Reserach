@@ -1,403 +1,320 @@
 #!/usr/bin/env python3
 """
-Open Targets Platform GraphQL Query Helper
+Open Targets Platform GraphQL Query Helper  (schema verified against API 26.09, 2026-11)
 
-This script provides reusable functions for querying the Open Targets Platform
-GraphQL API. Use these functions to retrieve target, disease, drug, and
-association data.
+Reusable functions for the Open Targets Platform GraphQL API.
 
-Dependencies: requests (pip install requests)
+Schema changes this file already handles (older snippets elsewhere will 400 or return null):
+  * `page:` requires BOTH `index` and `size`         -> page: {index: 0, size: N}
+  * datatypeScores { componentId } -> { id }
+  * evidences(datatypes: ...)      -> evidences(datasourceIds: ...)   (filter datatypeId client-side)
+  * Disease.knownDrugs             -> Disease.drugAndClinicalCandidates
+  * Drug.maximumClinicalTrialPhase -> Drug.maximumClinicalStage ("APPROVAL", "PHASE_3", ...)
+  * Drug.hasBeenWithdrawn / withdrawnNotice -> Drug.drugWarnings
+  * Most disease IDs moved EFO_ -> MONDO_ (atopic eczema EFO_0000274 -> MONDO_0004980).
+    disease(efoId: <obsolete id>) returns null with NO error. Use resolve_disease().
+
+Dependencies: requests
 """
 
+import time
+from typing import Any, Dict, List, Optional
+
 import requests
-import json
-from typing import Dict, List, Optional, Any
 
-
-# API endpoint
 BASE_URL = "https://api.platform.opentargets.org/api/v4/graphql"
 
 
-def execute_query(query: str, variables: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """
-    Execute a GraphQL query against the Open Targets Platform API.
-
-    Args:
-        query: GraphQL query string
-        variables: Optional dictionary of variables for the query
-
-    Returns:
-        Dictionary containing the API response data
-
-    Raises:
-        Exception if the API request fails or returns errors
-    """
-    payload = {"query": query}
-    if variables:
-        payload["variables"] = variables
-
-    try:
-        response = requests.post(BASE_URL, json=payload, timeout=30)
+def execute_query(query: str, variables: Optional[Dict[str, Any]] = None,
+                  retries: int = 3, timeout: int = 90) -> Dict[str, Any]:
+    """POST a GraphQL query. Raises with the server's GraphQL error message (not just '400')."""
+    payload = {"query": query, "variables": variables or {}}
+    last = None
+    for attempt in range(retries):
+        try:
+            response = requests.post(BASE_URL, json=payload, timeout=timeout)
+        except requests.exceptions.RequestException as e:
+            last = e
+            time.sleep(2 ** attempt)
+            continue
+        try:
+            data = response.json()
+        except ValueError:
+            data = {}
+        if data.get("errors"):
+            # Schema errors come back as HTTP 400 + a message naming the bad field. Surface it.
+            raise RuntimeError("GraphQL errors: " + "; ".join(e.get("message", "") for e in data["errors"]))
+        if response.status_code >= 500 or response.status_code == 429:
+            last = RuntimeError(f"HTTP {response.status_code}")
+            time.sleep(2 ** attempt)
+            continue
         response.raise_for_status()
-        data = response.json()
-
-        if "errors" in data:
-            raise Exception(f"GraphQL errors: {data['errors']}")
-
         return data.get("data", {})
-
-    except requests.exceptions.RequestException as e:
-        raise Exception(f"API request failed: {str(e)}")
+    raise RuntimeError(f"API request failed after {retries} attempts: {last}")
 
 
-def search_entities(query_string: str, entity_types: Optional[List[str]] = None) -> List[Dict[str, Any]]:
-    """
-    Search for targets, diseases, or drugs by name or identifier.
+def api_version() -> str:
+    """Release string such as '26.09'. Record it with every fetch for provenance."""
+    m = execute_query("{ meta { dataVersion { year month } } }")["meta"]["dataVersion"]
+    return f"{m['year']}.{m['month']}"
 
-    Args:
-        query_string: Search term (e.g., "BRCA1", "alzheimer", "aspirin")
-        entity_types: Optional list to filter by entity type ["target", "disease", "drug"]
 
-    Returns:
-        List of search results with id, name, entity type, and description
-    """
+def search_entities(query_string: str, entity_types: Optional[List[str]] = None,
+                    size: int = 10) -> List[Dict[str, Any]]:
+    """Search targets/diseases/drugs by name. entity_types: ["target"], ["disease"], ["drug"]."""
     query = """
-      query search($queryString: String!, $entityNames: [String!]) {
-        search(queryString: $queryString, entityNames: $entityNames, page: {size: 10}) {
-          hits {
-            id
-            entity
-            name
-            description
-          }
+      query search($queryString: String!, $entityNames: [String!], $size: Int!) {
+        search(queryString: $queryString, entityNames: $entityNames, page: {index: 0, size: $size}) {
+          hits { id entity name description }
         }
       }
     """
-
-    variables = {"queryString": query_string}
+    variables = {"queryString": query_string, "size": size}
     if entity_types:
         variables["entityNames"] = entity_types
+    return execute_query(query, variables).get("search", {}).get("hits", [])
 
-    result = execute_query(query, variables)
-    return result.get("search", {}).get("hits", [])
+
+def resolve_disease(term: str) -> Dict[str, Any]:
+    """Return the CURRENT disease record for a name or an ID (including obsolete EFO IDs).
+
+    An obsolete ID (e.g. EFO_0000274) makes disease(efoId:) return null silently, and
+    mapIds/search do not index obsolete IDs. So: try the ID directly; if null, require a
+    name and resolve it via mapIds, then confirm the old ID is listed in obsoleteTerms.
+    """
+    q = """query d($id: String!) { disease(efoId: $id) { id name obsoleteTerms dbXRefs } }"""
+    if "_" in term and " " not in term:
+        rec = execute_query(q, {"id": term}).get("disease")
+        if rec:
+            return rec
+        raise LookupError(
+            f"disease(efoId: '{term}') returned null - the ID is obsolete or unknown in this release. "
+            "Call resolve_disease('<disease name>') and use the returned id (usually MONDO_...).")
+    m = execute_query(
+        """query m($t: [String!]!) { mapIds(queryTerms: $t, entityNames: ["disease"]) { mappings { term hits { id name } } } }""",
+        {"t": [term]})
+    hits = m["mapIds"]["mappings"][0]["hits"] if m.get("mapIds") else []
+    if not hits:
+        hits = search_entities(term, ["disease"], size=1)
+    if not hits:
+        raise LookupError(f"No disease matches '{term}'")
+    return execute_query(q, {"id": hits[0]["id"]})["disease"]
 
 
 def get_target_info(ensembl_id: str, include_diseases: bool = False) -> Dict[str, Any]:
-    """
-    Retrieve comprehensive information about a target gene.
-
-    Args:
-        ensembl_id: Ensembl gene ID (e.g., "ENSG00000157764")
-        include_diseases: Whether to include top associated diseases
-
-    Returns:
-        Dictionary with target information including tractability, safety, expression
-    """
+    """Target annotation: tractability, safety liabilities, genetic constraint (+ top diseases)."""
     disease_fragment = """
-      associatedDiseases(page: {size: 10}) {
-        rows {
-          disease {
-            id
-            name
-          }
-          score
-          datatypeScores {
-            componentId
-            score
-          }
-        }
+      associatedDiseases(page: {index: 0, size: 10}) {
+        count
+        rows { disease { id name } score datatypeScores { id score } }
       }
     """ if include_diseases else ""
-
     query = f"""
       query targetInfo($ensemblId: String!) {{
         target(ensemblId: $ensemblId) {{
-          id
-          approvedSymbol
-          approvedName
-          biotype
-          functionDescriptions
-
-          tractability {{
-            label
-            modality
-            value
-          }}
-
+          id approvedSymbol approvedName biotype functionDescriptions
+          tractability {{ label modality value }}
           safetyLiabilities {{
-            event
-            effects {{
-              dosing
-              organsAffected
-            }}
-            biosamples {{
-              tissue {{
-                label
-              }}
-            }}
+            event datasource
+            effects {{ direction dosing }}
+            biosamples {{ tissueLabel cellLabel }}
           }}
-
-          geneticConstraint {{
-            constraintType
-            score
-            exp
-            obs
-          }}
-
+          geneticConstraint {{ constraintType score exp obs }}
           {disease_fragment}
         }}
       }}
     """
+    rec = execute_query(query, {"ensemblId": ensembl_id}).get("target")
+    if rec is None:
+        raise LookupError(f"target(ensemblId: '{ensembl_id}') returned null")
+    return rec
 
-    result = execute_query(query, {"ensemblId": ensembl_id})
-    return result.get("target", {})
 
-
-def get_disease_info(efo_id: str, include_targets: bool = False) -> Dict[str, Any]:
-    """
-    Retrieve information about a disease.
-
-    Args:
-        efo_id: EFO disease identifier (e.g., "EFO_0000249")
-        include_targets: Whether to include top associated targets
-
-    Returns:
-        Dictionary with disease information
-    """
+def get_disease_info(disease_id: str, include_targets: bool = False) -> Dict[str, Any]:
+    """Disease record (+ top 10 targets). Raises instead of silently returning {} on an obsolete ID."""
     target_fragment = """
-      associatedTargets(page: {size: 10}) {
-        rows {
-          target {
-            id
-            approvedSymbol
-            approvedName
-          }
-          score
-          datatypeScores {
-            componentId
-            score
-          }
-        }
+      associatedTargets(page: {index: 0, size: 10}) {
+        count
+        rows { target { id approvedSymbol approvedName } score datatypeScores { id score } }
       }
     """ if include_targets else ""
-
     query = f"""
       query diseaseInfo($efoId: String!) {{
         disease(efoId: $efoId) {{
-          id
-          name
-          description
-          therapeuticAreas {{
-            id
-            name
-          }}
-          synonyms {{
-            terms
-          }}
+          id name description obsoleteTerms
+          therapeuticAreas {{ id name }}
+          synonyms {{ relation terms }}
           {target_fragment}
         }}
       }}
     """
+    rec = execute_query(query, {"efoId": disease_id}).get("disease")
+    if rec is None:
+        raise LookupError(f"disease(efoId: '{disease_id}') returned null - obsolete ID? use resolve_disease()")
+    return rec
 
-    result = execute_query(query, {"efoId": efo_id})
-    return result.get("disease", {})
 
+def get_associated_targets(disease_id: str, page_size: int = 500,
+                           max_rows: Optional[int] = None) -> Dict[str, Any]:
+    """ALL targets associated with a disease, paginated. Returns {count, rows} and asserts completeness.
 
-def get_target_disease_evidence(ensembl_id: str, efo_id: str,
-                                  data_types: Optional[List[str]] = None) -> List[Dict[str, Any]]:
-    """
-    Retrieve evidence linking a target to a disease.
-
-    Args:
-        ensembl_id: Ensembl gene ID
-        efo_id: EFO disease identifier
-        data_types: Optional filter for evidence types (e.g., ["genetic_association", "known_drug"])
-
-    Returns:
-        List of evidence records with scores and sources
+    rows: [{target:{id, approvedSymbol, biotype}, score, datatypeScores:[{id, score}]}]
+    datatypeScores ids seen in 26.09: genetic_association, genetic_literature, somatic_mutation,
+    clinical, affected_pathway, rna_expression, literature, animal_model.
     """
     query = """
-      query evidences($ensemblId: String!, $efoId: String!, $dataTypes: [String!]) {
-        disease(efoId: $efoId) {
-          evidences(ensemblIds: [$ensemblId], datatypes: $dataTypes, size: 100) {
-            rows {
-              datasourceId
-              datatypeId
-              score
-              targetFromSourceId
-              studyId
-              literature
-              cohortPhenotypes
-            }
+      query at($id: String!, $index: Int!, $size: Int!) {
+        disease(efoId: $id) {
+          associatedTargets(page: {index: $index, size: $size}) {
+            count
+            rows { target { id approvedSymbol biotype } score datatypeScores { id score } }
           }
         }
       }
     """
+    rows, index, count = [], 0, None
+    while True:
+        d = execute_query(query, {"id": disease_id, "index": index, "size": page_size}).get("disease")
+        if d is None:
+            raise LookupError(f"disease(efoId: '{disease_id}') returned null - obsolete ID? use resolve_disease()")
+        at = d["associatedTargets"]
+        count = at["count"]
+        rows.extend(at["rows"])
+        index += 1
+        if not at["rows"] or len(rows) >= count or (max_rows and len(rows) >= max_rows):
+            break
+    if max_rows is None and len(rows) != count:
+        raise RuntimeError(f"pagination incomplete: {len(rows)} of {count}")
+    return {"count": count, "rows": rows}
 
-    variables = {"ensemblId": ensembl_id, "efoId": efo_id}
+
+def get_target_disease_evidence(ensembl_id: str, disease_id: str,
+                                data_types: Optional[List[str]] = None,
+                                datasource_ids: Optional[List[str]] = None,
+                                page_size: int = 500) -> List[Dict[str, Any]]:
+    """Evidence rows linking a target to a disease (cursor-paginated).
+
+    datasource_ids filters server-side (e.g. ["gwas_credible_sets", "gene_burden", "eva"]).
+    data_types filters client-side on datatypeId (e.g. ["genetic_association"]) because the
+    API no longer accepts a datatypes argument.
+    """
+    query = """
+      query ev($ensemblId: String!, $efoId: String!, $ds: [String!], $size: Int!, $cursor: String) {
+        disease(efoId: $efoId) {
+          evidences(ensemblIds: [$ensemblId], datasourceIds: $ds, size: $size, cursor: $cursor) {
+            count cursor
+            rows { datasourceId datatypeId score targetFromSourceId studyId literature cohortPhenotypes }
+          }
+        }
+      }
+    """
+    rows, cursor = [], None
+    while True:
+        v = {"ensemblId": ensembl_id, "efoId": disease_id, "ds": datasource_ids, "size": page_size, "cursor": cursor}
+        d = execute_query(query, v).get("disease")
+        if d is None:
+            raise LookupError(f"disease(efoId: '{disease_id}') returned null - obsolete ID? use resolve_disease()")
+        ev = d["evidences"]
+        rows.extend(ev["rows"])
+        cursor = ev.get("cursor")
+        if not cursor or not ev["rows"]:
+            break
     if data_types:
-        variables["dataTypes"] = data_types
-
-    result = execute_query(query, variables)
-    return result.get("disease", {}).get("evidences", {}).get("rows", [])
+        rows = [r for r in rows if r.get("datatypeId") in set(data_types)]
+    return rows
 
 
-def get_known_drugs_for_disease(efo_id: str) -> Dict[str, Any]:
-    """
-    Get drugs known to be used for a disease.
+def get_clinical_candidates_for_disease(disease_id: str) -> Dict[str, Any]:
+    """Drugs and clinical candidates for a disease (replaces the removed knownDrugs field).
 
-    Args:
-        efo_id: EFO disease identifier
-
-    Returns:
-        Dictionary with drug information including phase, targets, and status
+    Returns {count, rows:[{drug:{id,name,drugType,maximumClinicalStage}, maxClinicalStage,
+    actionTypes:[...], targets:[symbols]}]}. Stages: APPROVAL, PHASE_3, PHASE_2_3, PHASE_2,
+    PHASE_1_2, PHASE_1, EARLY_PHASE_1, IND, PRECLINICAL, UNKNOWN.
     """
     query = """
-      query knownDrugs($efoId: String!) {
+      query cc($efoId: String!) {
         disease(efoId: $efoId) {
-          knownDrugs {
-            uniqueDrugs
-            uniqueTargets
+          drugAndClinicalCandidates {
+            count
             rows {
+              maxClinicalStage
               drug {
-                id
-                name
-                drugType
-                maximumClinicalTrialPhase
+                id name drugType maximumClinicalStage
+                mechanismsOfAction { rows { actionType mechanismOfAction targets { approvedSymbol } } }
               }
-              targets {
-                id
-                approvedSymbol
-              }
-              phase
-              status
-              mechanismOfAction
             }
           }
         }
       }
     """
+    d = execute_query(query, {"efoId": disease_id}).get("disease")
+    if d is None:
+        raise LookupError(f"disease(efoId: '{disease_id}') returned null - obsolete ID? use resolve_disease()")
+    cc = d["drugAndClinicalCandidates"]
+    rows = []
+    for r in cc["rows"]:
+        drug = r.get("drug") or {}
+        moa = (drug.get("mechanismsOfAction") or {}).get("rows", [])
+        rows.append({
+            "drug": {k: drug.get(k) for k in ("id", "name", "drugType", "maximumClinicalStage")},
+            "maxClinicalStage": r["maxClinicalStage"],
+            "actionTypes": sorted({m["actionType"] for m in moa if m.get("actionType")}),
+            "targets": sorted({t["approvedSymbol"] for m in moa for t in m.get("targets", [])}),
+        })
+    return {"count": cc["count"], "rows": rows}
 
-    result = execute_query(query, {"efoId": efo_id})
-    return result.get("disease", {}).get("knownDrugs", {})
+
+# Backward-compatible name used in older docs. Returns the new structure (see above).
+get_known_drugs_for_disease = get_clinical_candidates_for_disease
 
 
 def get_drug_info(chembl_id: str) -> Dict[str, Any]:
-    """
-    Retrieve information about a drug.
-
-    Args:
-        chembl_id: ChEMBL identifier (e.g., "CHEMBL25")
-
-    Returns:
-        Dictionary with drug information
-    """
+    """Drug record: stage, warnings (withdrawals/black box), mechanisms, indications."""
     query = """
       query drugInfo($chemblId: String!) {
         drug(chemblId: $chemblId) {
-          id
-          name
-          synonyms
-          drugType
-          maximumClinicalTrialPhase
-          hasBeenWithdrawn
-          withdrawnNotice {
-            reasons
-            countries
-          }
-          mechanismsOfAction {
-            actionType
-            mechanismOfAction
-            targetName
-            targets {
-              id
-              approvedSymbol
-            }
-          }
-          indications {
-            disease
-            efoId
-            maxPhaseForIndication
-          }
+          id name drugType maximumClinicalStage description
+          drugWarnings { warningType description country year }
+          mechanismsOfAction { rows { actionType mechanismOfAction targetName targets { id approvedSymbol } } }
+          indications { count rows { maxClinicalStage disease { id name } } }
         }
       }
     """
+    rec = execute_query(query, {"chemblId": chembl_id}).get("drug")
+    if rec is None:
+        raise LookupError(f"drug(chemblId: '{chembl_id}') returned null")
+    return rec
 
-    result = execute_query(query, {"chemblId": chembl_id})
-    return result.get("drug", {})
 
-
-def get_target_associations(ensembl_id: str, min_score: float = 0.0) -> List[Dict[str, Any]]:
-    """
-    Get all disease associations for a target, filtered by minimum score.
-
-    Args:
-        ensembl_id: Ensembl gene ID
-        min_score: Minimum association score (0-1) to include
-
-    Returns:
-        List of disease associations with scores
-    """
+def get_target_associations(ensembl_id: str, min_score: float = 0.0, size: int = 100) -> List[Dict[str, Any]]:
+    """Top `size` disease associations for a target, filtered by minimum overall score."""
     query = """
-      query targetAssociations($ensemblId: String!) {
+      query ta($ensemblId: String!, $size: Int!) {
         target(ensemblId: $ensemblId) {
-          associatedDiseases(page: {size: 100}) {
+          associatedDiseases(page: {index: 0, size: $size}) {
             count
-            rows {
-              disease {
-                id
-                name
-              }
-              score
-              datatypeScores {
-                componentId
-                score
-              }
-            }
+            rows { disease { id name } score datatypeScores { id score } }
           }
         }
       }
     """
-
-    result = execute_query(query, {"ensemblId": ensembl_id})
-    associations = result.get("target", {}).get("associatedDiseases", {}).get("rows", [])
-
-    # Filter by minimum score
-    return [assoc for assoc in associations if assoc.get("score", 0) >= min_score]
+    t = execute_query(query, {"ensemblId": ensembl_id, "size": size}).get("target")
+    if t is None:
+        raise LookupError(f"target(ensemblId: '{ensembl_id}') returned null")
+    return [a for a in t["associatedDiseases"]["rows"] if a.get("score", 0) >= min_score]
 
 
-# Example usage
 if __name__ == "__main__":
-    # Example 1: Search for a gene
-    print("Searching for BRCA1...")
-    results = search_entities("BRCA1", entity_types=["target"])
-    for result in results[:3]:
-        print(f"  {result['name']} ({result['id']})")
-
-    # Example 2: Get target information
-    if results:
-        ensembl_id = results[0]['id']
-        print(f"\nGetting info for {ensembl_id}...")
-        target_info = get_target_info(ensembl_id, include_diseases=True)
-        print(f"  Symbol: {target_info.get('approvedSymbol')}")
-        print(f"  Name: {target_info.get('approvedName')}")
-
-        # Show top diseases
-        diseases = target_info.get('associatedDiseases', {}).get('rows', [])
-        if diseases:
-            print(f"\n  Top associated diseases:")
-            for disease in diseases[:3]:
-                print(f"    - {disease['disease']['name']} (score: {disease['score']:.2f})")
-
-    # Example 3: Search for a disease
-    print("\n\nSearching for Alzheimer's disease...")
-    disease_results = search_entities("alzheimer", entity_types=["disease"])
-    if disease_results:
-        efo_id = disease_results[0]['id']
-        print(f"  Found: {disease_results[0]['name']} ({efo_id})")
-
-        # Get known drugs
-        print(f"\n  Known drugs for {disease_results[0]['name']}:")
-        drugs = get_known_drugs_for_disease(efo_id)
-        for drug in drugs.get('rows', [])[:5]:
-            print(f"    - {drug['drug']['name']} (Phase {drug['phase']})")
+    # Known-answer smoke test: atopic eczema must resolve to a live ID, FLG must rank top-10,
+    # dupilumab must be an approved candidate. Any failure = broken instrument, not biology.
+    print("Open Targets release", api_version())
+    ad = resolve_disease("atopic eczema")
+    print("atopic eczema ->", ad["id"], "| obsolete IDs:", ad.get("obsoleteTerms"))
+    top = [r["target"]["approvedSymbol"] for r in get_disease_info(ad["id"], include_targets=True)["associatedTargets"]["rows"]]
+    print("top targets:", top)
+    assert "FLG" in top, "known-answer FAIL: FLG not in AD top 10"
+    cc = get_clinical_candidates_for_disease(ad["id"])
+    dup = [r for r in cc["rows"] if r["drug"]["name"] == "DUPILUMAB"]
+    print("candidates:", cc["count"], "| dupilumab:", dup[:1])
+    assert dup and dup[0]["maxClinicalStage"] == "APPROVAL", "known-answer FAIL: dupilumab"
+    print("OK")

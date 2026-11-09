@@ -1,5 +1,8 @@
 # Open Targets Platform API Reference
 
+> **Schema note (verified against API 26.09, 2026-11):** `page:` needs `{index, size}`; `datatypeScores { id score }` (not `componentId`); `evidences(datasourceIds:)` (no `datatypes:`); `knownDrugs` → `drugAndClinicalCandidates`; `maximumClinicalTrialPhase` → `maximumClinicalStage`; `expressions` → `baselineExpression`. Most disease IDs are now `MONDO_…` and an obsolete ID returns `null` silently. `scripts/query_opentargets.py` holds working queries; check any field here against the schema browser before relying on it.
+
+
 ## API Endpoint
 
 ```
@@ -80,20 +83,20 @@ Retrieve gene annotations, tractability assessments, and disease associations.
 - `biotype` - Gene type (protein_coding, etc.)
 - `tractability` - Druggability assessment
 - `safetyLiabilities` - Safety information
-- `expressions` - Baseline expression data
-- `knownDrugs` - Approved/clinical drugs
+- `baselineExpression` - Baseline expression data
+- `drugAndClinicalCandidates` - Approved/clinical drugs
 - `associatedDiseases` - Disease associations with evidence
 
 ### /disease
 Retrieve disease/phenotype data, known drugs, and clinical information.
 
 **Common fields:**
-- `id` - EFO disease identifier
+- `id` - Disease identifier (mostly `MONDO_…`; the argument is still named `efoId`)
 - `name` - Disease name
 - `description` - Disease description
 - `therapeuticAreas` - High-level disease categories
 - `synonyms` - Alternative names
-- `knownDrugs` - Drugs indicated for disease
+- `drugAndClinicalCandidates` - Drugs and clinical candidates for the disease
 - `associatedTargets` - Target associations with evidence
 
 ### /drug
@@ -103,7 +106,7 @@ Retrieve compound details, mechanisms of action, and pharmacovigilance data.
 - `id` - ChEMBL identifier
 - `name` - Drug name
 - `drugType` - Small molecule, antibody, etc.
-- `maximumClinicalTrialPhase` - Development stage
+- `maximumClinicalStage` - Development stage (`APPROVAL`, `PHASE_3`, …)
 - `indications` - Disease indications
 - `mechanismsOfAction` - Target mechanisms
 - `adverseEvents` - Pharmacovigilance data
@@ -138,14 +141,14 @@ query = """
         modality
         value
       }
-      associatedDiseases(page: {size: 10}) {
+      associatedDiseases(page: {index: 0, size: 10}) {
         rows {
           disease {
             name
           }
           score
           datatypeScores {
-            componentId
+            id
             score
           }
         }
@@ -192,38 +195,38 @@ query = """
     }
   }
 """
-variables = {"ensemblId": "ENSG00000157764", "efoId": "EFO_0000249"}
+variables = {"ensemblId": "ENSG00000157764", "efoId": "MONDO_0004975"}
 ```
 
-### Query 4: Get known drugs for a disease
+### Query 4: Get drugs and clinical candidates for a disease
 
 ```python
 query = """
-  query knownDrugs($efoId: String!) {
+  query candidates($efoId: String!) {
     disease(efoId: $efoId) {
-      knownDrugs {
-        uniqueDrugs
+      drugAndClinicalCandidates {
+        count
         rows {
+          maxClinicalStage
           drug {
-            name
             id
+            name
+            mechanismsOfAction { rows { actionType targets { approvedSymbol } } }
           }
-          targets {
-            approvedSymbol
-          }
-          phase
-          status
         }
       }
     }
   }
 """
-variables = {"efoId": "EFO_0000249"}
+variables = {"efoId": "MONDO_0004975"}
 ```
 
 ## Error Handling
 
-GraphQL returns status code 200 even for errors. Check the response structure:
+Schema/validation errors (unknown field, missing `page.index`) return **HTTP 400** with a JSON body whose
+`errors[].message` names the bad field — read the body, don't stop at `raise_for_status()`. Execution
+errors can come back as 200 with an `errors` key. An obsolete or unknown ID returns 200 with
+`"disease": null` and **no** error. Check all three:
 
 ```python
 if 'errors' in response_data:
@@ -236,7 +239,7 @@ else:
 
 1. **Request only needed fields** - Minimize data transfer and improve response time
 2. **Use variables** - Make queries reusable and safer
-3. **Handle pagination** - Most list fields support pagination with `page: {size: N, index: M}`
+3. **Handle pagination** - `page: {index: M, size: N}` — both fields are required
 4. **Explore the schema** - Use the GraphQL browser to discover available fields
 5. **Batch related queries** - Combine multiple entity fetches in a single query when possible
 6. **Cache results** - Store frequently accessed data locally to reduce API calls

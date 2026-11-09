@@ -37,6 +37,46 @@ def read_gene_list(filepath: str) -> List[str]:
         sys.exit(1)
 
 
+def _esearch_ids(term: str, api_key: Optional[str] = None, retmax: int = 5) -> List[str]:
+    base_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/"
+    params = {'db': 'gene', 'term': term, 'retmax': retmax, 'retmode': 'json'}
+    if api_key:
+        params['api_key'] = api_key
+    url = f"{base_url}esearch.fcgi?{urllib.parse.urlencode(params)}"
+    with urllib.request.urlopen(url) as response:
+        data = json.loads(response.read().decode())
+    time.sleep(0.1 if api_key else 0.34)
+    return data['esearchresult']['idlist']
+
+
+def resolve_symbol(query: str, organism: Optional[str] = None,
+                   api_key: Optional[str] = None) -> Dict[str, Any]:
+    """Resolve one symbol to a Gene ID without guessing.
+
+    1. Official symbol:  <q>[pref] AND <org>[orgn] AND alive[prop]
+    2. Alias fallback:   <q>[gene] AND <org>[orgn] AND alive[prop]   ([gene] includes aliases)
+
+    <q>[gene] alone is NOT safe: FLG[gene] returns FGFR1 first (FLG is an FGFR1 alias), so taking
+    the first hit maps FLG -> FGFR1. Returns {'query', 'gene_id', 'match', 'candidates'} with match in
+    official | alias | ambiguous | not_found | error. Ambiguous aliases are reported, never resolved.
+    """
+    org = f" AND {organism}[orgn]" if organism else ""
+    try:
+        ids = _esearch_ids(f"{query}[pref]{org} AND alive[prop]", api_key)
+        if len(ids) == 1:
+            return {'query': query, 'gene_id': ids[0], 'match': 'official', 'candidates': ids}
+        if not ids:
+            ids = _esearch_ids(f"{query}[gene]{org} AND alive[prop]", api_key)
+            if len(ids) == 1:
+                return {'query': query, 'gene_id': ids[0], 'match': 'alias', 'candidates': ids}
+        if ids:   # several genes (or several organisms when no organism was given)
+            return {'query': query, 'gene_id': None, 'match': 'ambiguous', 'candidates': ids}
+        return {'query': query, 'gene_id': None, 'match': 'not_found', 'candidates': []}
+    except Exception as e:
+        print(f"Error searching for {query}: {e}", file=sys.stderr)
+        return {'query': query, 'gene_id': None, 'match': 'error', 'candidates': []}
+
+
 def batch_esearch(queries: List[str], organism: Optional[str] = None,
                   api_key: Optional[str] = None) -> Dict[str, str]:
     """
@@ -44,53 +84,18 @@ def batch_esearch(queries: List[str], organism: Optional[str] = None,
 
     Args:
         queries: List of gene symbols
-        organism: Optional organism filter
+        organism: Optional organism filter (always give one for symbols)
         api_key: Optional NCBI API key
 
     Returns:
-        Dictionary mapping gene symbol to Gene ID (or 'NOT_FOUND')
+        Dictionary mapping gene symbol to Gene ID, or 'NOT_FOUND' / 'AMBIGUOUS' / 'ERROR'.
+        Use resolve_symbol() when you need the match type and candidate IDs.
     """
-    base_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/"
-    results = {}
-
-    # Rate limiting
-    delay = 0.1 if api_key else 0.34  # 10 req/sec with key, 3 req/sec without
-
-    for query in queries:
-        # Build search term
-        search_term = f"{query}[gene]"
-        if organism:
-            search_term += f" AND {organism}[organism]"
-
-        params = {
-            'db': 'gene',
-            'term': search_term,
-            'retmax': 1,
-            'retmode': 'json'
-        }
-
-        if api_key:
-            params['api_key'] = api_key
-
-        url = f"{base_url}esearch.fcgi?{urllib.parse.urlencode(params)}"
-
-        try:
-            with urllib.request.urlopen(url) as response:
-                data = json.loads(response.read().decode())
-
-            if 'esearchresult' in data and 'idlist' in data['esearchresult']:
-                id_list = data['esearchresult']['idlist']
-                results[query] = id_list[0] if id_list else 'NOT_FOUND'
-            else:
-                results[query] = 'ERROR'
-
-        except Exception as e:
-            print(f"Error searching for {query}: {e}", file=sys.stderr)
-            results[query] = 'ERROR'
-
-        time.sleep(delay)
-
-    return results
+    out = {}
+    for q in queries:
+        r = resolve_symbol(q, organism, api_key)
+        out[q] = r['gene_id'] or {'not_found': 'NOT_FOUND', 'ambiguous': 'AMBIGUOUS'}.get(r['match'], 'ERROR')
+    return out
 
 
 def batch_esummary(gene_ids: List[str], api_key: Optional[str] = None,
@@ -192,12 +197,13 @@ def batch_lookup_by_symbols(gene_symbols: List[str], organism: str,
     Returns:
         List of gene information dictionaries
     """
-    # First, search for IDs
+    # First, resolve symbols (official symbol first, unique alias second, never a guess)
     print(f"Searching for {len(gene_symbols)} gene symbols...", file=sys.stderr)
-    symbol_to_id = batch_esearch(gene_symbols, organism=organism, api_key=api_key)
+    resolved = {sym: resolve_symbol(sym, organism, api_key) for sym in gene_symbols}
+    symbol_to_id = {sym: (r['gene_id'] or r['match'].upper()) for sym, r in resolved.items()}
 
     # Filter to valid IDs
-    valid_ids = [id for id in symbol_to_id.values() if id not in ['NOT_FOUND', 'ERROR']]
+    valid_ids = [r['gene_id'] for r in resolved.values() if r['gene_id']]
 
     if not valid_ids:
         print("No genes found", file=sys.stderr)
@@ -216,15 +222,17 @@ def batch_lookup_by_symbols(gene_symbols: List[str], organism: str,
                 'query_symbol': symbol,
                 'status': 'not_found'
             })
-        elif gene_id == 'ERROR':
+        elif gene_id in ('AMBIGUOUS', 'ERROR'):
             results.append({
                 'query_symbol': symbol,
-                'status': 'error'
+                'status': gene_id.lower(),
+                'candidates': resolved[symbol]['candidates']
             })
         elif gene_id in summaries:
             gene = summaries[gene_id]
             results.append({
                 'query_symbol': symbol,
+                'match': resolved[symbol]['match'],          # official | alias
                 'gene_id': gene_id,
                 'symbol': gene.get('name', 'N/A'),
                 'description': gene.get('description', 'N/A'),

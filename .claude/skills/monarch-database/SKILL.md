@@ -20,13 +20,21 @@ Monarch enables:
 
 **Key resources:**
 - Monarch portal: https://monarchinitiative.org/
-- Monarch API v3: https://api-v3.monarchinitiative.org/v3/
+- Monarch API v3 base: https://api-v3.monarchinitiative.org/v3/api  (the `/api` segment is required — without it every call 404s)
 - API docs: https://api-v3.monarchinitiative.org/v3/docs
 - HPO browser: https://hpo.jax.org/
 
 ## When to Use This Skill
 
 Use Monarch when:
+
+> **Coverage first.** Monarch is Mendelian-focused. A complex disease (atopic dermatitis, psoriasis, obesity,
+> RA) can return **zero genes** on its main ID — atopic eczema `MONDO:0004980` returns 0 — while one or two
+> curated genes sit on `<disease>, susceptibility to` and numbered OMIM loci (FLG on `MONDO:0100178`,
+> `MONDO:0011596`). That zero is a coverage gap: record it as *no curated gene–disease associations*, do not
+> mark the fetch failed, and do not list Monarch as a contributing source. Prove the fetch itself works with
+> a Mendelian control (cystic fibrosis `MONDO:0009061` → CFTR `causes`).
+
 
 - **Rare disease gene discovery**: What genes are associated with my patient's phenotypes (HPO terms)?
 - **Phenotype similarity**: Are two diseases similar based on their phenotypic profiles?
@@ -38,283 +46,99 @@ Use Monarch when:
 
 ## Core Capabilities
 
-### 1. Monarch API v3
+All examples use `scripts/monarch_v3.py` (paginated, retrying, row totals asserted). Run
+`python scripts/monarch_v3.py` for the known-answer smoke test.
 
-Base URL: `https://api-v3.monarchinitiative.org/v3/`
-
-```python
-import requests
-
-BASE_URL = "https://api-v3.monarchinitiative.org/v3"
-
-def monarch_get(endpoint, params=None):
-    """Make a GET request to the Monarch API."""
-    url = f"{BASE_URL}/{endpoint}"
-    response = requests.get(url, params=params, headers={"Accept": "application/json"})
-    response.raise_for_status()
-    return response.json()
-```
-
-### 2. Phenotype-to-Gene Association (Pheno2Gene)
+### 1. API basics
 
 ```python
-def get_genes_for_phenotypes(hpo_ids, limit=50, offset=0):
-    """
-    Find genes associated with a list of HPO phenotype terms.
-    Core use case: rare disease differential diagnosis.
+import sys; sys.path.insert(0, "scripts")
+import monarch_v3 as m
 
-    Args:
-        hpo_ids: List of HPO term IDs (e.g., ["HP:0001250", "HP:0004322"])
-        limit: Maximum number of results
-    """
-    params = {
-        "terms": hpo_ids,
-        "limit": limit,
-        "offset": offset
-    }
-    return monarch_get("semsim/termset-pairwise-similarity/analyze", params)
-
-def phenotype_to_gene(hpo_ids):
-    """
-    Return genes whose phenotypes match the given HPO terms.
-    Uses semantic similarity scoring.
-    """
-    # Use the /association endpoint for direct phenotype-gene links
-    all_genes = []
-    for hpo_id in hpo_ids:
-        data = monarch_get("association/all", {
-            "subject": hpo_id,
-            "predicate": "biolink:has_phenotype",
-            "category": "biolink:GeneToPhenotypicFeatureAssociation",
-            "limit": 50
-        })
-        for assoc in data.get("items", []):
-            all_genes.append({
-                "phenotype_id": hpo_id,
-                "gene_id": assoc.get("object", {}).get("id"),
-                "gene_name": assoc.get("object", {}).get("name"),
-                "evidence": assoc.get("evidence_type")
-            })
-    return all_genes
-
-# Example: Find genes associated with seizures and short stature
-hpo_terms = ["HP:0001250", "HP:0004322"]  # Seizures, Short stature
-genes = phenotype_to_gene(hpo_terms)
+# GET https://api-v3.monarchinitiative.org/v3/api/association?object=MONDO:0009061&subject_category=biolink:Gene
+rows = m.associations(object="MONDO:0009061", subject_category="biolink:Gene")
+rows[0]
+# {'subject': 'HGNC:11073', 'subject_label': 'SLC9A3', 'subject_taxon': 'NCBITaxon:9606',
+#  'predicate': 'biolink:gene_associated_with_condition', 'object': 'MONDO:0009061',
+#  'object_label': 'cystic fibrosis', 'primary_knowledge_source': 'infores:orphanet', 'category': ...}
 ```
 
-### 3. Disease-to-Gene Associations
+Items are **flat strings** — `item["subject_label"]`, not `item["subject"]["name"]` (that raises
+`AttributeError: 'str' object has no attribute 'get'`). Filters: `subject`, `object`, `subject_category`,
+`object_category`, `predicate`, `category`, `subject_taxon`. Response: `{limit, offset, total, items}`.
+
+### 2. Disease → genes
 
 ```python
-def get_genes_for_disease(disease_id, limit=100):
-    """
-    Get all genes associated with a disease.
-    Disease IDs: OMIM:146300, MONDO:0007739, ORPHANET:558, etc.
-    """
-    params = {
-        "object": disease_id,
-        "category": "biolink:DiseaseToDiseaseAssociation",
-        "limit": limit
-    }
-    # Use the gene-disease association endpoint
-    gene_params = {
-        "subject": disease_id,
-        "category": "biolink:GeneToPhenotypicFeatureAssociation",
-        "limit": limit
-    }
-
-    data = monarch_get("association/all", {
-        "object": disease_id,
-        "predicate": "biolink:has_phenotype",
-        "limit": limit
-    })
-    return data
-
-def get_disease_genes(disease_id, limit=100):
-    """Get genes causally linked to a disease."""
-    data = monarch_get("association/all", {
-        "subject_category": "biolink:Gene",
-        "object": disease_id,
-        "predicate": "biolink:causes",
-        "limit": limit
-    })
-    return data.get("items", [])
-
-# MONDO disease IDs (preferred over OMIM for cross-ontology queries)
-# MONDO:0007739 - Huntington disease
-# MONDO:0009061 - Cystic fibrosis
-# OMIM:104300 - Alzheimer disease, susceptibility to, type 1
+genes = m.disease_genes("MONDO:0009061")          # human genes, descendant diseases included
+[g for g in genes if g["predicate"] == "causes"]  # [{'symbol': 'CFTR', 'source': 'infores:omim', ...}]
 ```
 
-### 4. Gene-to-Phenotype and Disease
+Predicates, strongest first: `causes` (OMIM, Mendelian) → `contributes_to` (susceptibility) →
+`gene_associated_with_condition` (Orphanet; includes modifiers such as SLC9A3, HMOX1 for CF).
+Keep the predicate — a modifier gene is not a causal gene.
+
+For a complex disease, also collect the susceptibility entries and report which entry each gene came from:
 
 ```python
-def get_phenotypes_for_gene(gene_id, limit=100):
-    """
-    Get all phenotypes associated with a gene.
-    Gene IDs: HGNC:7884, NCBIGene:4137, etc.
-    """
-    data = monarch_get("association/all", {
-        "subject": gene_id,
-        "predicate": "biolink:has_phenotype",
-        "limit": limit
-    })
-    return data.get("items", [])
-
-def get_diseases_for_gene(gene_id, limit=100):
-    """Get diseases caused by variants in a gene."""
-    data = monarch_get("association/all", {
-        "subject": gene_id,
-        "object_category": "biolink:Disease",
-        "limit": limit
-    })
-    return data.get("items", [])
-
-# Example: What diseases does BRCA1 cause?
-brca1_diseases = get_diseases_for_gene("HGNC:1100")
-for assoc in brca1_diseases:
-    print(f"  {assoc.get('object', {}).get('name')} ({assoc.get('object', {}).get('id')})")
+m.disease_genes_with_susceptibility("atopic dermatitis")
+# {'MONDO:0011596 dermatitis, atopic, 2': [FLG], 'MONDO:0100178 dermatitis, atopic, susceptibility to': [FLG],
+#  'MONDO:0054697 immunodeficiency 11b with atopic dermatitis': [CARD11]}   <- a distinct syndrome; exclude
 ```
 
-### 5. HPO Term Lookup
+### 3. Disease ↔ phenotypes, gene ↔ phenotypes / diseases
 
 ```python
-def get_hpo_term(hpo_id):
-    """Fetch information about an HPO term."""
-    return monarch_get(f"entity/{hpo_id}")
-
-def search_hpo_terms(query, limit=20):
-    """Search for HPO terms by name."""
-    params = {
-        "q": query,
-        "category": "biolink:PhenotypicFeature",
-        "limit": limit
-    }
-    return monarch_get("search", params)
-
-# Example: look up the HPO term for seizures
-seizure_term = get_hpo_term("HP:0001250")
-print(f"Name: {seizure_term.get('name')}")
-print(f"Definition: {seizure_term.get('description')}")
-
-# Search for related terms
-epilepsy_terms = search_hpo_terms("epilepsy")
-for term in epilepsy_terms.get("items", [])[:5]:
-    print(f"  {term['id']}: {term['name']}")
+m.disease_phenotypes("MONDO:0009061")    # 84 HPO terms   (category DiseaseToPhenotypicFeatureAssociation)
+m.gene_phenotypes("HGNC:1884")           # CFTR: 38 HPO terms (category GeneToPhenotypicFeatureAssociation)
+m.gene_diseases("HGNC:1884")             # CFTR: 10 diseases  (object_category biolink:Disease)
+m.phenotype_genes("HP:0001250", max_items=1000)   # Seizure incl. descendant terms (~3.3k rows total)
 ```
 
-### 6. Semantic Similarity (Disease Comparison)
+### 4. Lookup and search
 
 ```python
-def compare_disease_phenotypes(disease_id_1, disease_id_2):
-    """
-    Compare two diseases by semantic similarity of their phenotype profiles.
-    Returns similarity score using HPO hierarchy.
-    """
-    params = {
-        "subjects": [disease_id_1],
-        "objects": [disease_id_2],
-        "metric": "ancestor_information_content"
-    }
-    return monarch_get("semsim/compare", params)
-
-# Example: Compare Dravet syndrome with CDKL5-deficiency disorder
-similarity = compare_disease_phenotypes("MONDO:0100135", "MONDO:0014917")
+m.entity("HP:0001250")["name"]                    # 'Seizure'
+m.entity("MONDO:0004980")["xref"]                 # includes 'EFO:0000274' -> map old EFO ids to MONDO
+m.search("atopic dermatitis", "biolink:Disease")  # MONDO:0004980 atopic eczema, MONDO:0011608 ...
+m.search("epilepsy", "biolink:PhenotypicFeature")
 ```
 
-### 7. Cross-Species Orthologs
+### 5. Phenotype similarity
 
 ```python
-def get_orthologs(gene_id, species=None):
-    """
-    Get orthologs of a human gene in model organisms.
-    Useful for finding animal models of human diseases.
-    """
-    params = {"limit": 50}
-    if species:
-        params["subject_taxon"] = species
-
-    data = monarch_get("association/all", {
-        "subject": gene_id,
-        "predicate": "biolink:orthologous_to",
-        "limit": 50
-    })
-    return data.get("items", [])
-
-# NCBI Taxonomy IDs for common model organisms:
-# Mouse: 10090 (Mus musculus)
-# Zebrafish: 7955 (Danio rerio)
-# Fruit fly: 7227 (Drosophila melanogaster)
-# C. elegans: 6239
-# Rat: 10116 (Rattus norvegicus)
+s = m.compare_termsets(["HP:0001250", "HP:0001252"], ["HP:0001250", "HP:0002353"])
+s["average_score"], s["best_score"], s["subject_best_matches"]
 ```
 
-### 8. Full Workflow: Rare Disease Gene Prioritization
+This is `GET /semsim/compare/{subjects}/{objects}` with comma-separated HPO IDs. The query-parameter form
+(`/semsim/compare?subjects=...&objects=...`) returns **405**. To compare two diseases, fetch
+`disease_phenotypes()` for each and compare the HPO lists.
+
+### 6. Model organisms and orthologs
 
 ```python
-import requests
-import pandas as pd
-
-def rare_disease_gene_finder(patient_hpo_terms, candidate_gene_ids=None, top_n=20):
-    """
-    Find genes that match a patient's HPO phenotype profile.
-
-    Args:
-        patient_hpo_terms: List of HPO IDs from clinical assessment
-        candidate_gene_ids: Optional list to restrict search
-        top_n: Number of top candidates to return
-    """
-    BASE_URL = "https://api-v3.monarchinitiative.org/v3"
-
-    # 1. Find genes associated with each phenotype
-    gene_phenotype_counts = {}
-
-    for hpo_id in patient_hpo_terms:
-        data = requests.get(
-            f"{BASE_URL}/association/all",
-            params={
-                "object": hpo_id,
-                "subject_category": "biolink:Gene",
-                "limit": 100
-            }
-        ).json()
-
-        for item in data.get("items", []):
-            gene_id = item.get("subject", {}).get("id")
-            gene_name = item.get("subject", {}).get("name")
-            if gene_id:
-                if gene_id not in gene_phenotype_counts:
-                    gene_phenotype_counts[gene_id] = {"name": gene_name, "count": 0, "phenotypes": []}
-                gene_phenotype_counts[gene_id]["count"] += 1
-                gene_phenotype_counts[gene_id]["phenotypes"].append(hpo_id)
-
-    # 2. Rank by number of matching phenotypes
-    ranked = sorted(gene_phenotype_counts.items(),
-                    key=lambda x: -x[1]["count"])[:top_n]
-
-    results = []
-    for gene_id, info in ranked:
-        results.append({
-            "gene_id": gene_id,
-            "gene_name": info["name"],
-            "matching_phenotypes": info["count"],
-            "total_patient_phenotypes": len(patient_hpo_terms),
-            "phenotype_overlap": info["count"] / len(patient_hpo_terms),
-            "matching_hpo_terms": info["phenotypes"]
-        })
-
-    return pd.DataFrame(results)
-
-# Example usage
-patient_phenotypes = [
-    "HP:0001250",  # Seizures
-    "HP:0004322",  # Short stature
-    "HP:0001252",  # Hypotonia
-    "HP:0000252",  # Microcephaly
-    "HP:0001263",  # Global developmental delay
-]
-candidates = rare_disease_gene_finder(patient_phenotypes)
-print(candidates[["gene_name", "matching_phenotypes", "phenotype_overlap"]].to_string())
+m.disease_models("MONDO:0004980")   # 32 mouse genotypes 'model_of' atopic eczema (Trpv3, Casp8 ...)
+m.orthologs("HGNC:1100")            # BRCA1 orthologs: dog, chicken, ...
 ```
+
+Animal-model genotypes are cross-species evidence (E2/E4 in this project's tiers), never a human gene–disease
+edge on their own.
+
+### 7. Rare-disease gene ranking from patient phenotypes
+
+```python
+from collections import Counter
+patient = ["HP:0001250", "HP:0004322", "HP:0001252", "HP:0000252", "HP:0001263"]
+hits = Counter()
+for hp in patient:
+    for g in {r["symbol"] for r in m.phenotype_genes(hp, max_items=2000)}:
+        hits[g] += 1
+hits.most_common(20)     # genes matching the most patient phenotypes
+```
+
+`phenotype_genes` includes descendant HPO terms, so broad terms (Seizure) return thousands of rows; prefer
+specific terms, or use `compare_termsets` against each candidate's phenotype set.
 
 ## Query Workflows
 

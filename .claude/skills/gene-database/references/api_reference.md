@@ -42,12 +42,12 @@ Search for genes matching a text query.
 - `usehistory=y` - Store results on history server for large result sets
 
 **Query Syntax:**
-- Gene symbol: `BRCA1[gene]` or `BRCA1[gene name]`
-- Organism: `human[organism]` or `9606[taxid]`
-- Combine terms: `BRCA1[gene] AND human[organism]`
-- Disease: `muscular dystrophy[disease]`
-- Chromosome: `17q21[chromosome]`
-- GO terms: `GO:0006915[biological process]`
+- Official symbol: `BRCA1[pref]`; symbol or alias: `BRCA1[gene]` (aliases collide: `FLG[gene]` also returns FGFR1)
+- Organism: `human[orgn]` or `txid9606[orgn]` (`[taxid]` is not a field and is silently ignored)
+- Combine terms: `BRCA1[pref] AND human[orgn] AND alive[prop]`
+- Disease: `"muscular dystrophy"[dis]` (`[disease]` is silently ignored)
+- Chromosome: `17[chr]`; cytogenetic band: `17q21[MV]`
+- GO terms: `"apoptotic process"[GO]` (term name; GO IDs return 0)
 
 **Example Request:**
 
@@ -180,7 +180,7 @@ The Datasets API provides streamlined access to gene data with metadata and sequ
 ### Base URL
 
 ```
-https://api.ncbi.nlm.nih.gov/datasets/v2alpha/gene
+https://api.ncbi.nlm.nih.gov/datasets/v2/gene
 ```
 
 ### Authentication
@@ -200,7 +200,8 @@ Retrieve gene data by Gene ID.
 **Example Request:**
 
 ```bash
-curl "https://api.ncbi.nlm.nih.gov/datasets/v2alpha/gene/id/672"
+curl "https://api.ncbi.nlm.nih.gov/datasets/v2/gene/id/672"
+# several IDs: .../v2/gene/id/672,7157
 ```
 
 **Response Format (JSON):**
@@ -259,7 +260,9 @@ Retrieve gene data by symbol and organism.
 **Example Request:**
 
 ```bash
-curl "https://api.ncbi.nlm.nih.gov/datasets/v2alpha/gene/symbol/BRCA1/taxon/9606"
+curl "https://api.ncbi.nlm.nih.gov/datasets/v2/gene/symbol/BRCA1/taxon/9606"
+# Matches aliases too: symbol/FLG/taxon/9606 returns FGFR1 and FLG - keep the report whose
+# gene.symbol equals the query
 ```
 
 ### Get Multiple Genes
@@ -279,7 +282,7 @@ Retrieve data for multiple genes.
 **Example Request:**
 
 ```bash
-curl -X POST "https://api.ncbi.nlm.nih.gov/datasets/v2alpha/gene/id" \
+curl -X POST "https://api.ncbi.nlm.nih.gov/datasets/v2/gene" \
   -H "Content-Type: application/json" \
   -d '{"gene_ids": ["672", "7157", "5594"]}'
 ```

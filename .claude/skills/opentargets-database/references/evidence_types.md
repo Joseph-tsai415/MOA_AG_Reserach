@@ -1,5 +1,8 @@
 # Evidence Types and Data Sources
 
+> **Schema note (verified against API 26.09, 2026-11):** `page:` needs `{index, size}`; `datatypeScores { id score }` (not `componentId`); `evidences(datasourceIds:)` (no `datatypes:`); `knownDrugs` → `drugAndClinicalCandidates`; `maximumClinicalTrialPhase` → `maximumClinicalStage`; `expressions` → `baselineExpression`. Most disease IDs are now `MONDO_…` and an obsolete ID returns `null` silently. `scripts/query_opentargets.py` holds working queries; check any field here against the schema browser before relying on it.
+
+
 ## Overview
 
 Evidence represents any event or set of events that identifies a target as a potential causal gene or protein for a disease. Evidence is standardized and mapped to:
@@ -91,9 +94,9 @@ Evidence from clinical precedence showing drugs targeting genes for disease indi
 - Withdrawn drugs
 - Drug-target-indication triplets with mechanism of action
 
-**Clinical Trial Information:**
-- `phase`: Maximum clinical trial phase (1, 2, 3, 4)
-- `status`: Active, terminated, completed, withdrawn
+**Clinical stage information:**
+- `maxClinicalStage`: string stage (`APPROVAL`, `PHASE_3`, `PHASE_2`, … `PRECLINICAL`, `UNKNOWN`)
+- datatype id for this evidence is now `clinical` (formerly `known_drug`)
 - `mechanismOfAction`: How drug affects target
 
 ### 4. Affected Pathways
@@ -251,21 +254,26 @@ Each evidence source has its own scoring methodology:
 
 ```python
 query = """
-  query evidenceByType($ensemblId: String!, $efoId: String!, $dataTypes: [String!]) {
+  query evidenceBySource($ensemblId: String!, $efoId: String!, $ds: [String!]) {
     disease(efoId: $efoId) {
-      evidences(ensemblIds: [$ensemblId], datatypes: $dataTypes) {
+      evidences(ensemblIds: [$ensemblId], datasourceIds: $ds, size: 100) {
+        count
+        cursor
         rows {
           datasourceId
+          datatypeId
           score
         }
       }
     }
   }
 """
+# The API filters by DATASOURCE id only. To filter by datatype, drop $ds and keep rows whose
+# datatypeId is in your set (scripts/query_opentargets.get_target_disease_evidence does this).
 variables = {
     "ensemblId": "ENSG00000157764",
-    "efoId": "EFO_0000249",
-    "dataTypes": ["genetic_association", "somatic_mutation"]
+    "efoId": "MONDO_0004975",
+    "ds": ["gwas_credible_sets", "gene_burden", "eva"]
 }
 ```
 
@@ -277,14 +285,14 @@ Data type scores aggregate all source scores within that type:
 query = """
   query associationScores($ensemblId: String!, $efoId: String!) {
     target(ensemblId: $ensemblId) {
-      associatedDiseases(efoIds: [$efoId]) {
+      associatedDiseases(Bs: [$efoId]) {   # Bs = filter to these disease IDs
         rows {
           disease {
             name
           }
           score
           datatypeScores {
-            componentId
+            id
             score
           }
         }

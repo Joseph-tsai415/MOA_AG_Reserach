@@ -197,6 +197,52 @@ expression_df = pd.DataFrame(expression_data)
 print(f"Expression matrix: {expression_df.shape}")
 ```
 
+> **`pivot_samples("VALUE")` only works for microarray series.** For RNA-seq, GEOparse sample tables are
+> empty `(0, 0)` and `pivot_samples` raises `KeyError: 'ID_REF'`; the series-matrix file has zero data rows
+> (GSE121212: 147 samples, 0 rows). Get RNA-seq counts from section 3b below. Code that swallows the
+> exception ends up with no matrix and can wrongly conclude the dataset has no expression data.
+
+### 3b. RNA-seq raw counts (NCBI-generated or supplementary)
+
+For human and mouse RNA-seq, GEO publishes NCBI-processed raw counts (rows = NCBI GeneID, columns = GSM):
+`https://www.ncbi.nlm.nih.gov/geo/download/?type=rnaseq_counts&acc=GSE121212` lists
+`GSE121212_raw_counts_GRCh38.p13_NCBI.tsv.gz` (plus FPKM/TPM). `scripts/geo_rnaseq_counts.py` downloads it,
+maps GeneID → symbol via NCBI `gene_info`, and returns a samples × genes matrix plus sample metadata:
+
+```python
+import sys; sys.path.insert(0, "scripts")
+from geo_rnaseq_counts import list_ncbi_count_files, ncbi_raw_counts, sample_metadata
+
+list_ncbi_count_files("GSE121212")        # [] = no NCBI counts -> use the submitter's suppl/ files
+counts, _ = ncbi_raw_counts("GSE121212", "./data")   # (144, 39375); counts.attrs["source"], ["n_unmapped"]
+md = sample_metadata("GSE121212", "./data")          # from characteristics_ch1: "patient's condition", "skin type"
+md["group"] = md["patient's condition"] + "_" + md["skin type"]
+keep = md.index[md.group.isin(["AD_lesional", "CTRL_healthy"])].intersection(counts.index)
+```
+
+Then hand off to the project's DE code (Welch engine by default; `pydeseq2` segfaults in this environment):
+
+```python
+from moa_lib.transcriptomics import disease_signature
+sig = disease_signature(counts.loc[keep], md.loc[keep], "group", "AD_lesional", "CTRL_healthy")
+sig.up_genes[:5], sig.results_df.loc["S100A8"]       # S100A8 log2FC ~ +6, padj ~ 1e-11
+```
+
+`python scripts/geo_rnaseq_counts.py ./data` runs this as a known-answer test (S100A8, S100A9, KRT16 and
+SERPINB4 must be up in lesional AD).
+
+Checks that matter:
+- **Sample alignment.** GEO lists 147 GSMs for GSE121212 but the counts file has 144 columns. Intersect
+  counts with metadata and report the dropped samples; never assume the order matches.
+- **CAPTCHA pages arrive as HTTP 200.** `www.ncbi.nlm.nih.gov/geo/download` sometimes returns a reCAPTCHA
+  page instead of the file or listing. The helper checks gzip magic bytes and raises `GeoCaptchaError`, which
+  means *unknown*, not *absent*. Do not try to get around it: wait and retry, or save the file from a browser
+  into `./data` (cached files are reused). `ftp.ncbi.nlm.nih.gov` (gene_info, series matrix, suppl files)
+  was not gated.
+- **No NCBI counts** (older series, other organisms, single-cell): use `/geo/series/GSEnnn/GSE…/suppl/` and
+  parse whatever the submitter provided; record the file name and its gene-ID type.
+- Use raw counts for DE, never FPKM/TPM.
+
 **Accessing Supplementary Files:**
 
 ```python
@@ -279,14 +325,15 @@ def fetch_geo_summaries(id_list, db="gds"):
     handle.close()
     return summaries
 
-# Step 3: Fetch full records
-def fetch_geo_records(id_list, db="gds"):
-    """Fetch full GEO records"""
-    ids = ",".join(id_list)
-    handle = Entrez.efetch(db=db, id=ids, retmode="xml")
-    records = Entrez.read(handle)
+# Step 3: Full record text. efetch on db="gds" returns PLAIN TEXT only - with retmode="xml",
+# Entrez.read() fails (StreamModeError / not XML). Use esummary (above) for structured fields
+# (accession, n_samples, gdsType, suppFile, ftplink, pubmedids) and GEOparse for sample metadata.
+def fetch_geo_text(id_list, db="gds"):
+    """Human-readable record text (title, summary, platform, sample list)."""
+    handle = Entrez.efetch(db=db, id=",".join(id_list))
+    text = handle.read()
     handle.close()
-    return records
+    return text
 
 # Example workflow
 search_results = search_geo("breast cancer AND Homo sapiens")
@@ -346,11 +393,31 @@ gse_list = ["GSE100001", "GSE100002", "GSE100003"]
 metadata = batch_fetch_geo_metadata(gse_list)
 ```
 
-### 5. Direct FTP Access for Data Files
+### 5. Direct File Access (HTTPS mirror of the FTP site)
 
-**FTP URLs for GEO Data:**
+Every GEO FTP path is also served over HTTPS at `https://ftp.ncbi.nlm.nih.gov/geo/...`. Prefer HTTPS: plain
+FTP (port 21, passive mode) is often blocked in containers and cloud runners, and `requests` gives you status
+codes and retries. The `ftplib` version below works on an open network.
 
-GEO data can be downloaded directly via FTP:
+```python
+import requests, os
+
+def download_geo_https(accession, file_type="matrix", dest_dir="./data"):
+    """Download a series file over HTTPS; verify gzip magic before trusting it."""
+    stub = accession[:-3] + "nnn" if len(accession) > 6 else "GSEnnn"
+    sub = {"matrix": ("matrix", f"{accession}_series_matrix.txt.gz"),
+           "soft": ("soft", f"{accession}_family.soft.gz")}[file_type]
+    url = f"https://ftp.ncbi.nlm.nih.gov/geo/series/{stub}/{accession}/{sub[0]}/{sub[1]}"
+    r = requests.get(url, timeout=600)
+    r.raise_for_status()
+    assert r.content[:2] == b"\x1f\x8b", f"not gzip: {url}"
+    os.makedirs(dest_dir, exist_ok=True)
+    path = os.path.join(dest_dir, sub[1])
+    open(path, "wb").write(r.content)
+    return path
+```
+
+FTP equivalent:
 
 ```python
 import ftplib
@@ -399,13 +466,13 @@ download_geo_ftp("GSE123456", file_type="soft")
 
 ```bash
 # Download series matrix file
-wget ftp://ftp.ncbi.nlm.nih.gov/geo/series/GSE123nnn/GSE123456/matrix/GSE123456_series_matrix.txt.gz
+wget https://ftp.ncbi.nlm.nih.gov/geo/series/GSE123nnn/GSE123456/matrix/GSE123456_series_matrix.txt.gz
 
 # Download all supplementary files for a series
-wget -r -np -nd ftp://ftp.ncbi.nlm.nih.gov/geo/series/GSE123nnn/GSE123456/suppl/
+wget -r -np -nd https://ftp.ncbi.nlm.nih.gov/geo/series/GSE123nnn/GSE123456/suppl/
 
 # Download SOFT format family file
-wget ftp://ftp.ncbi.nlm.nih.gov/geo/series/GSE123nnn/GSE123456/soft/GSE123456_family.soft.gz
+wget https://ftp.ncbi.nlm.nih.gov/geo/series/GSE123nnn/GSE123456/soft/GSE123456_family.soft.gz
 ```
 
 ### 6. Analyzing GEO Data
@@ -806,7 +873,7 @@ Consult this reference for in-depth technical details, complex query patterns, o
 - **GEO Submission Guidelines:** https://www.ncbi.nlm.nih.gov/geo/info/submission.html
 - **GEOparse Documentation:** https://geoparse.readthedocs.io/
 - **E-utilities Documentation:** https://www.ncbi.nlm.nih.gov/books/NBK25501/
-- **GEO FTP Site:** ftp://ftp.ncbi.nlm.nih.gov/geo/
+- **GEO FTP Site (HTTPS):** https://ftp.ncbi.nlm.nih.gov/geo/
 - **GEO2R Tool:** https://www.ncbi.nlm.nih.gov/geo/geo2r/
 - **NCBI API Keys:** https://ncbiinsights.ncbi.nlm.nih.gov/2017/11/02/new-api-keys-for-the-e-utilities/
 - **Biopython Tutorial:** https://biopython.org/DIST/docs/tutorial/Tutorial.html

@@ -314,6 +314,69 @@ Export search results in various formats for citation management and further ana
 efetch.fcgi?db=pubmed&id=PMID1,PMID2&rettype=medline&retmode=text
 ```
 
+## Failures That Look Like Answers
+
+Each of these returns HTTP 200 and plausible output. Check for them before reporting a count or a citation.
+
+### A zero from `[tiab]` is a blind spot, not absent literature
+
+PubMed indexes title, abstract and MeSH, not Methods or Results. Reagents, doses, protocols and most
+numbers live in the full text: `"collagenase VIII"[tiab]` returns **1** PubMed record, while Europe PMC full
+text returns **712** (checked 2026-11). Never write "no evidence exists" from a `[tiab]` zero. Search full text instead:
+
+```python
+import requests
+r = requests.get("https://www.ebi.ac.uk/europepmc/webservices/rest/search",
+                 params={"query": '"collagenase VIII"', "format": "json", "resultType": "core",
+                         "pageSize": 100, "cursorMark": "*"})
+r.json()["hitCount"]          # paginate with nextCursorMark; isOpenAccess / inEPMC mark minable records
+# Full text XML: https://www.ebi.ac.uk/europepmc/webservices/rest/PMC1234567/fullTextXML
+# (no "/PMC/" path segment - .../rest/PMC/PMC1234567/fullTextXML is a 404)
+```
+
+Expect full text for roughly a third of a broad open-access set; mark everything else as abstract-level evidence.
+
+### efetch DOIs: the reference-list trap
+
+A `<PubmedArticle>` embeds its `<ReferenceList>`, and every cited paper carries its own
+`<ArticleId IdType="doi">`. A greedy search such as `art.iter("ArticleId")` sees 9 DOIs for PMID 25756877
+(1 own + 8 cited), so a dict built that way ends up holding a **cited** paper's DOI. Titles and PMIDs stay
+correct, so a PMID-only citation check still passes. Read only the article's own IDs:
+
+```python
+import xml.etree.ElementTree as ET
+
+def own_ids(art):
+    """DOI/PMC of THIS article, never of a paper in its reference list."""
+    ids = {a.get("IdType"): (a.text or "") for a in art.findall("./PubmedData/ArticleIdList/ArticleId")}
+    if not ids.get("doi"):
+        for el in art.findall("./MedlineCitation/Article/ELocationID"):
+            if el.get("EIdType") == "doi":
+                ids["doi"] = el.text or ""
+                break
+    return ids
+
+for art in ET.fromstring(xml_bytes).findall("./PubmedArticle"):
+    pmid = art.findtext("./MedlineCitation/PMID")
+    doi = own_ids(art).get("doi", "")
+```
+
+Post-check: the DOI prefix must match the journal (`10.1371/journal.pone` = PLoS One, `10.1093/nar` =
+Nucleic Acids Research). A mismatch means this bug.
+
+### A resolving PMID is not a supported claim
+
+The PMID existing proves nothing about the sentence it is attached to. Before a `(claim, PMID)` pair enters
+a report, check the retrieved title/abstract supports that specific claim (entity, number, year, authors).
+This project's gate is `moa_lib.citation_grounding`; see `.claude/docs/instrument_gotchas.md` §1.6 for its
+known false passes.
+
+### Throttling
+
+Without an API key NCBI allows 3 requests/s; above that it returns **429**. Sleep ≥ 0.35 s between calls
+(≥ 0.1 s with `api_key`) and retry 429/5xx with backoff. If the retries give up, record the query as
+`FETCH_FAILED`; a swallowed exception that leaves an empty list must never be reported as zero hits.
+
 ## Working with Reference Files
 
 This skill includes three comprehensive reference files in the `references/` directory:

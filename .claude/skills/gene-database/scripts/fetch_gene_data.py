@@ -14,7 +14,8 @@ import urllib.request
 from typing import Optional, Dict, Any, List
 
 
-DATASETS_API_BASE = "https://api.ncbi.nlm.nih.gov/datasets/v2alpha/gene"
+# v2 is the current Datasets API (v2alpha was the pre-release path). Verified 2026-11.
+DATASETS_API_BASE = "https://api.ncbi.nlm.nih.gov/datasets/v2/gene"
 
 
 def get_taxon_id(taxon_name: str) -> Optional[str]:
@@ -111,7 +112,7 @@ def fetch_gene_by_symbol(symbol: str, taxon: str, api_key: Optional[str] = None)
     try:
         req = urllib.request.Request(url, headers=headers)
         with urllib.request.urlopen(req) as response:
-            return json.loads(response.read().decode())
+            data = json.loads(response.read().decode())
     except urllib.error.HTTPError as e:
         print(f"HTTP Error {e.code}: {e.reason}", file=sys.stderr)
         if e.code == 404:
@@ -120,6 +121,24 @@ def fetch_gene_by_symbol(symbol: str, taxon: str, api_key: Optional[str] = None)
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
         return {}
+
+    # The symbol endpoint also matches ALIASES: symbol/FLG returns FGFR1 (FLG is an FGFR1 alias)
+    # before FLG itself. Keep only the gene whose official symbol is the query; fall back to the
+    # alias hit only when it is the single match, and say so.
+    reports = data.get("reports", [])
+    exact = [r for r in reports if r.get("gene", {}).get("symbol", "").upper() == symbol.upper()]
+    if exact:
+        data["alias_hits_dropped"] = [r["gene"]["symbol"] for r in reports if r not in exact]
+        data["reports"] = exact
+        data["match"] = "official"
+    elif len(reports) == 1:
+        data["match"] = "alias"
+        print(f"Note: '{symbol}' is an alias of {reports[0]['gene']['symbol']}", file=sys.stderr)
+    elif reports:
+        data["match"] = "ambiguous"
+        print(f"Warning: alias '{symbol}' matches {[r['gene']['symbol'] for r in reports]} - not choosing one",
+              file=sys.stderr)
+    return data
 
 
 def fetch_multiple_genes(gene_ids: List[str], api_key: Optional[str] = None) -> Dict[str, Any]:
@@ -133,10 +152,10 @@ def fetch_multiple_genes(gene_ids: List[str], api_key: Optional[str] = None) -> 
     Returns:
         Combined gene data as dictionary
     """
-    # For multiple genes, use POST request
-    url = f"{DATASETS_API_BASE}/id"
+    # For multiple genes, POST {"gene_ids": [...]} to the gene collection (v2: /gene, not /gene/id)
+    url = DATASETS_API_BASE
 
-    data = json.dumps({"gene_ids": gene_ids}).encode('utf-8')
+    data = json.dumps({"gene_ids": [int(g) for g in gene_ids]}).encode('utf-8')
     headers = {'Content-Type': 'application/json'}
 
     if api_key:
@@ -162,19 +181,24 @@ def display_gene_info(data: Dict[str, Any], verbose: bool = False) -> None:
         data: Gene data dictionary from API
         verbose: Show detailed information
     """
-    if 'genes' not in data:
+    rows = data.get('reports') or data.get('genes')   # Datasets v2 returns 'reports'
+    if not rows:
         print("No gene data found in response")
         return
+    if data.get('match') and data['match'] != 'official':
+        print(f"[match: {data['match']}]")
+    if data.get('alias_hits_dropped'):
+        print(f"[alias hits dropped: {', '.join(data['alias_hits_dropped'])}]")
 
-    for gene in data['genes']:
+    for gene in rows:
         gene_info = gene.get('gene', {})
 
         print(f"Gene ID: {gene_info.get('gene_id', 'N/A')}")
         print(f"Symbol: {gene_info.get('symbol', 'N/A')}")
         print(f"Description: {gene_info.get('description', 'N/A')}")
 
-        if 'tax_name' in gene_info:
-            print(f"Organism: {gene_info['tax_name']}")
+        if gene_info.get('taxname') or gene_info.get('tax_name'):
+            print(f"Organism: {gene_info.get('taxname') or gene_info.get('tax_name')}")
 
         if 'chromosomes' in gene_info:
             chromosomes = ', '.join(gene_info['chromosomes'])

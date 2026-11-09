@@ -177,19 +177,21 @@ Be cautious with variants that have:
 ### Search for High-Confidence Pathogenic Variants
 
 ```
-BRCA1[gene] AND pathogenic[CLNSIG] AND practice guideline[RVSTAT]
+BRCA1[gene] AND clinsig_pathogenic[prop] AND "reviewed by expert panel"[RVST]
+# ("practice guideline"[RVST] exists for some genes, e.g. 23 CFTR records; BRCA1 pathogenic has none,
+#  so its highest available tier is "reviewed by expert panel" - 2,243 records, checked 2026-11)
 ```
 
 ### Filter by Review Status
 
 ```
-TP53[gene] AND (reviewed by expert panel[RVSTAT] OR practice guideline[RVSTAT])
+TP53[gene] AND ("reviewed by expert panel"[RVST] OR "practice guideline"[RVST])
 ```
 
 ### Exclude Conflicting Interpretations
 
 ```
-CFTR[gene] AND pathogenic[CLNSIG] NOT conflicting[RVSTAT]
+CFTR[gene] AND clinsig_pathogenic[prop] NOT clinsig_has_conflicts[prop]
 ```
 
 ## Updates and Reclassifications

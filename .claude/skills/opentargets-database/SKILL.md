@@ -55,7 +55,11 @@ results = search_entities("BRCA1", entity_types=["target"])
 ```python
 # Search by disease name
 results = search_entities("alzheimer", entity_types=["disease"])
-# Returns: [{"id": "EFO_0000249", "name": "Alzheimer disease", ...}]
+# Returns: [{"id": "MONDO_0004975", "name": "Alzheimer disease", ...}]
+
+# For a disease ID or name you will hand to every other call, prefer resolve_disease():
+from scripts.query_opentargets import resolve_disease
+ad = resolve_disease("atopic eczema")   # -> {"id": "MONDO_0004980", "obsoleteTerms": ["HP_0000964", "EFO_0000274"], ...}
 ```
 
 **For drugs:**
@@ -67,7 +71,8 @@ results = search_entities("aspirin", entity_types=["drug"])
 
 **Identifiers used:**
 - Targets: Ensembl gene IDs (e.g., `ENSG00000157764`)
-- Diseases: EFO (Experimental Factor Ontology) IDs (e.g., `EFO_0000249`)
+- Diseases: mostly **MONDO** IDs now (e.g., `MONDO_0004975` Alzheimer disease, `MONDO_0004980` atopic eczema); some EFO/HP IDs remain. The GraphQL argument is still called `efoId`.
+  **An obsolete ID returns `disease: null` with no error** — `EFO_0000274` (atopic eczema) and `EFO_0000249` (Alzheimer) are obsolete. Resolve names with `resolve_disease()`; the helpers raise `LookupError` on a null instead of returning `{}`.
 - Drugs: ChEMBL IDs (e.g., `CHEMBL25`)
 
 ### 2. Query Target Information
@@ -103,7 +108,7 @@ Get disease details and associated targets/drugs.
 ```python
 from scripts.query_opentargets import get_disease_info
 
-disease_info = get_disease_info("EFO_0000249", include_targets=True)
+disease_info = get_disease_info("MONDO_0004975", include_targets=True)
 
 # Access fields:
 # - name: Disease name
@@ -122,19 +127,20 @@ from scripts.query_opentargets import get_target_disease_evidence
 # Get all evidence
 evidence = get_target_disease_evidence(
     ensembl_id="ENSG00000157764",
-    efo_id="EFO_0000249"
+    disease_id="MONDO_0004975"
 )
 
 # Filter by evidence type
 genetic_evidence = get_target_disease_evidence(
     ensembl_id="ENSG00000157764",
-    efo_id="EFO_0000249",
-    data_types=["genetic_association"]
+    disease_id="MONDO_0004975",
+    data_types=["genetic_association"]        # filtered client-side on datatypeId
+    # datasource_ids=["gwas_credible_sets", "gene_burden", "eva"]  # filtered server-side
 )
 
 # Each evidence record contains:
 # - datasourceId: Specific data source (e.g., "gwas_catalog", "chembl")
-# - datatypeId: Evidence category (e.g., "genetic_association", "known_drug")
+# - datatypeId: Evidence category (e.g., "genetic_association", "clinical")
 # - score: Evidence strength (0-1)
 # - studyId: Original study identifier
 # - literature: Associated publications
@@ -143,7 +149,7 @@ genetic_evidence = get_target_disease_evidence(
 **Major evidence types:**
 1. **genetic_association:** GWAS, rare variants, ClinVar, gene burden
 2. **somatic_mutation:** Cancer Gene Census, IntOGen, cancer biomarkers
-3. **known_drug:** Clinical precedence from approved/clinical drugs
+3. **clinical:** Clinical precedence from approved/clinical drugs (was `known_drug` before 2026)
 4. **affected_pathway:** CRISPR screens, pathway analyses, gene signatures
 5. **rna_expression:** Differential expression from Expression Atlas
 6. **animal_model:** Mouse phenotypes from IMPC
@@ -156,26 +162,22 @@ Refer to `references/evidence_types.md` for detailed descriptions of all evidenc
 Identify drugs used for a disease and their targets.
 
 ```python
-from scripts.query_opentargets import get_known_drugs_for_disease
+from scripts.query_opentargets import get_clinical_candidates_for_disease
 
-drugs = get_known_drugs_for_disease("EFO_0000249")
+cc = get_clinical_candidates_for_disease("MONDO_0004980")   # atopic eczema
 
-# drugs contains:
-# - uniqueDrugs: Total number of unique drugs
-# - uniqueTargets: Total number of unique targets
-# - rows: List of drug-target-indication records with:
-#   - drug: {name, drugType, maximumClinicalTrialPhase}
-#   - targets: Genes targeted by the drug
-#   - phase: Clinical trial phase for this indication
-#   - status: Trial status (active, completed, etc.)
-#   - mechanismOfAction: How drug works
+# cc = {"count": 238, "rows": [...]}; each row:
+# - drug: {id, name, drugType, maximumClinicalStage}
+# - maxClinicalStage: furthest stage FOR THIS DISEASE
+# - actionTypes: e.g. ["ANTAGONIST"]   (from the drug's mechanismsOfAction)
+# - targets: e.g. ["IL4R"]
 ```
 
-**Clinical phases:**
-- Phase 4: Approved drug
-- Phase 3: Late-stage clinical trials
-- Phase 2: Mid-stage trials
-- Phase 1: Early safety trials
+The `knownDrugs` field was removed from the API; `get_known_drugs_for_disease` is kept as an alias of
+`get_clinical_candidates_for_disease` and returns the structure above (no `uniqueDrugs`, `phase`, `status`).
+
+**Clinical stages** (strings, not integers): `APPROVAL`, `PHASE_3`, `PHASE_2_3`, `PHASE_2`, `PHASE_1_2`,
+`PHASE_1`, `EARLY_PHASE_1`, `IND`, `PRECLINICAL`, `UNKNOWN`.
 
 ### 6. Get Drug Information
 
@@ -187,12 +189,11 @@ from scripts.query_opentargets import get_drug_info
 drug_info = get_drug_info("CHEMBL25")
 
 # Access:
-# - name, synonyms: Drug identifiers
-# - drugType: Small molecule, antibody, etc.
-# - maximumClinicalTrialPhase: Development stage
-# - mechanismsOfAction: Target and action type
-# - indications: Diseases with trial phases
-# - withdrawnNotice: If withdrawn, reasons and countries
+# - name, description, drugType: Small molecule, Antibody, etc.
+# - maximumClinicalStage: "APPROVAL", "PHASE_3", ...
+# - mechanismsOfAction.rows: actionType, mechanismOfAction, targets
+# - indications: {count, rows: [{maxClinicalStage, disease: {id, name}}]}
+# - drugWarnings: withdrawals / black-box warnings (replaces hasBeenWithdrawn + withdrawnNotice)
 ```
 
 ### 7. Get All Associations for a Target
@@ -220,6 +221,18 @@ associations = get_target_associations(
 - NOT confidence scores but relative ranking metrics
 - Under-studied diseases may have lower scores despite good evidence
 
+## Known-Answer Control (run before trusting a disease fetch)
+
+Open Targets fails **silently**: an obsolete disease ID returns `null`, not an error, and an empty
+result looks like "no associated targets". Before using a disease's targets:
+
+1. `resolve_disease(name)` and record the resolved ID **and** `api_version()`.
+2. Check a gene that must be there, e.g. FLG in the atopic eczema top 10, APOE for Alzheimer disease.
+3. `count == len(rows)` after pagination (`get_associated_targets()` asserts this).
+
+If any check fails, mark the source `FETCH_FAILED` — never report "Open Targets found no targets".
+`python scripts/query_opentargets.py` runs these checks for atopic eczema.
+
 ## GraphQL API Details
 
 **For custom queries beyond the provided helper functions**, use the GraphQL API directly or modify `scripts/query_opentargets.py`.
@@ -229,7 +242,8 @@ Key information:
 - **Interactive browser:** `https://api.platform.opentargets.org/api/v4/graphql/browser`
 - **No authentication required**
 - **Request only needed fields** to minimize response size
-- **Use pagination** for large result sets: `page: {size: N, index: M}`
+- **Pagination:** `page:` needs **both** `index` and `size` — `page: {size: 10}` alone is a 400 error. `get_associated_targets()` paginates a full disease and asserts the row total.
+- **Errors:** a schema mismatch returns HTTP 400 with a message naming the bad field; `execute_query()` raises that message. Read it before guessing.
 
 Refer to `references/api_reference.md` for:
 - Complete endpoint documentation
@@ -276,7 +290,7 @@ When prioritizing drug targets:
 ### Common Workflows
 
 **Workflow 1: Target Discovery for a Disease**
-1. Search for disease → get EFO ID
+1. `resolve_disease(name)` → current disease ID (usually MONDO)
 2. Query disease info with `include_targets=True`
 3. Review top targets sorted by association score
 4. For promising targets, get detailed target info
@@ -293,8 +307,8 @@ When prioritizing drug targets:
 7. Check known drugs targeting gene for mechanism insights
 
 **Workflow 3: Drug Repurposing**
-1. Search for disease → get EFO ID
-2. Get known drugs for disease
+1. `resolve_disease(name)` → current disease ID
+2. `get_clinical_candidates_for_disease()`
 3. For each drug, get detailed drug info
 4. Examine mechanisms of action and targets
 5. Look for related disease indications
@@ -319,7 +333,10 @@ Helper functions for common API operations:
 - `get_target_info()` - Retrieve target annotations
 - `get_disease_info()` - Retrieve disease information
 - `get_target_disease_evidence()` - Get supporting evidence
-- `get_known_drugs_for_disease()` - Find drugs for a disease
+- `resolve_disease()` - Name or ID → current disease record; raises on an obsolete ID
+- `get_associated_targets()` - All targets for a disease, paginated, completeness asserted
+- `get_clinical_candidates_for_disease()` - Drugs/candidates for a disease (alias: `get_known_drugs_for_disease`)
+- `api_version()` - Release string (e.g. "26.09") to record with every fetch
 - `get_drug_info()` - Retrieve drug details
 - `get_target_associations()` - Get all associations for a target
 - `execute_query()` - Execute custom GraphQL queries
@@ -353,7 +370,7 @@ Complete target annotation reference:
 
 ## Data Updates and Versioning
 
-The Open Targets Platform is updated **quarterly** with new data releases. The current release (as of October 2025) is available at the API endpoint.
+The Open Targets Platform is updated **quarterly** with new data releases. Record `api_version()` with every fetch. The helper script was last verified against release **26.09** (2026-11); `python scripts/query_opentargets.py` re-runs its known-answer smoke test.
 
 **Release information:** Check https://platform-docs.opentargets.org/release-notes for the latest updates.
 
