@@ -56,13 +56,25 @@ model.train()
 de_results = model.differential_expression(
     groupby="cell_type",
     group1="T cells",
-    group2="B cells"
+    group2="B cells",
+    mode="change",   # REQUIRED for lfc_* and is_de_fdr_* columns (SCVI default is "vanilla")
+    delta=0.25,
 )
 
-# View top DE genes
-top_genes = de_results.sort_values("lfc_mean", ascending=False).head(20)
-print(top_genes[["lfc_mean", "lfc_std", "bayes_factor", "is_de_fdr_0.05"]])
+# Rank only genes that are significant AND expressed in group 1
+sig = de_results[de_results["is_de_fdr_0.05"] & (de_results["non_zeros_proportion1"] > 0.1)]
+top_genes = sig.sort_values("lfc_mean", ascending=False).head(20)
+print(top_genes[["lfc_mean", "lfc_std", "bayes_factor", "is_de_fdr_0.05", "non_zeros_proportion1"]])
 ```
+
+> **Two traps (scvi-tools 1.5.2, checked 2026-11-10):**
+> 1. **`mode` decides the columns.** For `SCVI` (and other RNA models using `RNASeqMixin`) the default is
+>    `mode="vanilla"`, which returns only `proba_m1, proba_m2, bayes_factor, scale1, scale2` plus raw
+>    expression columns — so `sort_values("lfc_mean")` raises `KeyError: 'lfc_mean'`. Pass `mode="change"`.
+>    (`TOTALVI.differential_expression` already defaults to `"change"`.)
+> 2. **Never rank by `lfc_mean` alone.** Rarely expressed genes get huge, noisy fold changes. On PBMC 3k
+>    (B vs T cells) the unfiltered top 15 by `lfc_mean` was led by lncRNA clones, BACE2, PGF and IL6; filtering
+>    to `is_de_fdr_0.05` and `non_zeros_proportion1 > 0.1` gave MS4A1, CD79A, CD79B, HLA-DR/DQ, TCL1A.
 
 ### One vs. Rest Comparison
 
@@ -116,9 +128,10 @@ de = model.differential_expression(groupby="cell_type", group1="T cells")
 
 ### `mode` (Hypothesis Testing Mode)
 
-**"vanilla" mode** (default): Point null hypothesis
+**"vanilla" mode** (default for SCVI): Point null hypothesis
 - Tests if β = 0 exactly
 - More sensitive, but may find trivially small effects
+- Returns no `lfc_*`, `proba_de` or `is_de_fdr_*` columns — only `proba_m1`, `proba_m2`, `bayes_factor`, `scale1`, `scale2`
 
 **"change" mode**: Composite null hypothesis
 - Tests if |β| ≤ δ
@@ -196,7 +209,8 @@ de = model.differential_expression(
 
 ### Output Columns
 
-The results DataFrame contains several important columns:
+The results DataFrame contains several important columns (effect-size and FDR columns exist only with
+`mode="change"`):
 
 **Effect Size Estimates**:
 - `lfc_mean`: Mean log fold-change
@@ -206,15 +220,17 @@ The results DataFrame contains several important columns:
 - `lfc_max`: Upper bound of effect size
 
 **Statistical Significance**:
-- `bayes_factor`: Bayes factor for differential expression
-  - Higher values = stronger evidence
+- `proba_de`: Posterior probability that |LFC| > `delta`
+- `bayes_factor`: **natural-log** Bayes factor, `log(proba_de) - log(1 - proba_de)`
+  - Higher values = stronger evidence; can be negative
   - >3 often considered meaningful
-- `is_de_fdr_0.05`: Boolean indicating if gene is DE at FDR 0.05
-- `is_de_fdr_0.1`: Boolean indicating if gene is DE at FDR 0.1
+- `is_de_fdr_0.05`: Boolean, DE at the requested FDR. Exactly one such column is created, named after
+  `fdr_target` (default 0.05; pass `fdr_target=0.1` to get `is_de_fdr_0.1` instead)
 
 **Expression Levels**:
-- `mean1`: Mean expression in group 1
-- `mean2`: Mean expression in group 2
+- `scale1`, `scale2`: Model-estimated mean normalized expression per group
+- `raw_mean1`, `raw_mean2`: Mean raw counts per group
+- `raw_normalized_mean1`, `raw_normalized_mean2`: Mean library-size-normalized counts per group
 - `non_zeros_proportion1`: Proportion of non-zero cells in group 1
 - `non_zeros_proportion2`: Proportion of non-zero cells in group 2
 
@@ -224,13 +240,15 @@ The results DataFrame contains several important columns:
 de_results = model.differential_expression(
     groupby="cell_type",
     group1="T cells",
-    group2="B cells"
+    group2="B cells",
+    mode="change",
 )
 
-# Find significantly upregulated genes in T cells
+# Find significantly upregulated genes in T cells (expressed in >=10% of T cells)
 upreg_tcells = de_results[
     (de_results["is_de_fdr_0.05"]) &
-    (de_results["lfc_mean"] > 0)
+    (de_results["lfc_mean"] > 0) &
+    (de_results["non_zeros_proportion1"] > 0.1)
 ].sort_values("lfc_mean", ascending=False)
 
 print(f"Upregulated genes in T cells: {len(upreg_tcells)}")
@@ -298,22 +316,20 @@ import numpy as np
 de = model.differential_expression(
     groupby="condition",
     group1="treated",
-    group2="control"
+    group2="control",
+    mode="change",
 )
 
-# Volcano plot
+# Volcano plot (bayes_factor is already a natural-log Bayes factor; plot it directly)
 plt.figure(figsize=(10, 6))
-plt.scatter(
-    de["lfc_mean"],
-    -np.log10(1 / (de["bayes_factor"] + 1)),
-    c=de["is_de_fdr_0.05"],
-    cmap="coolwarm",
-    alpha=0.5
-)
-plt.xlabel("Log Fold Change")
-plt.ylabel("-log10(1/Bayes Factor)")
+for is_de, color, label in [(False, "lightgrey", "not DE"), (True, "tab:red", "DE (FDR 0.05)")]:
+    sub = de[de["is_de_fdr_0.05"] == is_de]
+    plt.scatter(sub["lfc_mean"], sub["bayes_factor"], c=color, alpha=0.5, s=8, label=label)
+plt.xlabel("Mean log fold change")
+plt.ylabel("log Bayes factor")
 plt.title("Volcano Plot: Treated vs Control")
 plt.axvline(x=0, color='k', linestyle='--', linewidth=0.5)
+plt.legend()
 plt.show()
 ```
 
@@ -322,8 +338,9 @@ plt.show()
 ```python
 import seaborn as sns
 
-# Get top DE genes
-top_genes = de.sort_values("lfc_mean", ascending=False).head(50).index
+# Get top DE genes (significant and expressed, then ranked by effect size)
+sig = de[de["is_de_fdr_0.05"] & (de["non_zeros_proportion1"] > 0.1)]
+top_genes = sig.sort_values("lfc_mean", ascending=False).head(50).index
 
 # Get normalized expression
 norm_expr = model.get_normalized_expression(

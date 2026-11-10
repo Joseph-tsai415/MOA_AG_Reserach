@@ -176,6 +176,14 @@ uv pip install scvi-tools
 uv pip install scvi-tools[cuda]
 ```
 
+**A GPU is optional.** Training runs on CPU; a GPU only makes it faster. In this project's `moa` env
+(checked 2026-11-10): `torch 2.10.0+cpu` (no CUDA), `scvi-tools 1.5.2` installed with **pip**, because torch
+came from pip and the conda-forge package would pull in a second PyTorch. Use `model.train(accelerator="cpu")`.
+Measured on this Windows machine: PBMC 3k (2,700 cells × 2,000 HVGs), default 400 epochs, **178–318 s**
+(0.45–0.80 s/epoch, varying with machine load). The default `max_epochs` is 400 up to 20,000 cells and then
+falls as `20000 / n_cells × 400`, so CPU time levels off above ~20k cells. A rough extrapolation from the PBMC
+timing, not measured: ~20–40 min per model there. A GPU is worth it only for atlas-scale data or many models.
+
 ## Best Practices
 
 1. **Use raw counts**: Always provide unnormalized count data to models
@@ -183,6 +191,7 @@ uv pip install scvi-tools[cuda]
 3. **Register covariates**: Include known technical factors (batch, donor, etc.) in `setup_anndata`
 4. **Feature selection**: Use highly variable genes for improved performance
 5. **Model saving**: Always save trained models to avoid retraining
-6. **GPU usage**: Enable GPU acceleration for large datasets (`accelerator="gpu"`)
+6. **GPU usage**: Optional. `accelerator="gpu"` speeds up large datasets; without CUDA use `accelerator="cpu"` (see Installation)
 7. **Scanpy integration**: Store outputs in AnnData objects for downstream analysis
+8. **DE output**: Pass `mode="change"` before reading `lfc_mean`/`is_de_fdr_*`, and rank only expressed, significant genes (see `references/differential-expression.md`)
 
