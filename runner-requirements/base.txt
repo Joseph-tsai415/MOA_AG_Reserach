@@ -50,14 +50,19 @@ gseapy>=1.1                       # enrichment cross-check (Step 4)
 adjustText>=1.1                   # non-overlapping figure labels
 upsetplot>=0.9                    # Step 3 intersections beyond 3 sets (sdist, pure python)
 plotly>=5.20                      # Step 4 Sankey (CLAUDE.md lists plotly)
-kaleido==0.2.1                    # plotly -> PNG. PINNED: kaleido>=1.0 needs a system Chrome
+kaleido==0.2.1 ; sys_platform != "win32"   # plotly -> PNG. PINNED: kaleido>=1.0 needs a system Chrome
+# Windows: kaleido 0.2.1 hangs forever in write_image (measured 2026-11-10, plotly 6.6.0); 1.x drives an
+# installed Chrome (1.2.0: Sankey PNG in 1.9 s). A machine without Chrome: run `plotly_get_chrome -y` in the env.
+kaleido>=1.0 ; sys_platform == "win32"
 h5py>=3.10
 pyyaml>=6.0
 psutil>=5.9
 tqdm>=4.66
 
 # Docking (Step 4 L3 — in-silico, decoy-controlled)
-vina>=1.2.5
+# vina: no Windows wheel on PyPI and no win-64 build on conda-forge (checked 2026-11-10); the sdist needs Boost +
+# a C++ compiler. Linux/macOS unchanged. On Windows run L3 docking under WSL or Docker (runner-requirements/README.md).
+vina>=1.2.5 ; sys_platform != "win32"
 meeko>=0.5
 gemmi>=0.6                        # meeko 0.8 imports it but does not declare it
 openbabel-wheel>=3.1

@@ -262,7 +262,8 @@ import matplotlib.pyplot as plt
 from matplotlib import font_manager as fm
 
 CJK_CANDIDATES = ["Microsoft JhengHei", "Noto Sans TC", "Noto Sans CJK TC", "PingFang TC",   # Traditional
-                  "Microsoft YaHei", "Noto Sans SC", "Noto Sans CJK SC", "SimHei"]          # Simplified
+                  "Microsoft YaHei", "Noto Sans SC", "Noto Sans CJK SC", "SimHei",          # Simplified
+                  "Noto Sans CJK JP"]   # Debian/Ubuntu fonts-noto-cjk: the only face matplotlib registers
 
 def use_cjk_font(prefer=CJK_CANDIDATES):
     installed = {f.name for f in fm.fontManager.ttflist}
@@ -291,6 +292,10 @@ savefig_checked(fig, "figure.png", dpi=300, bbox_inches="tight")
 Tested 2026-11 (matplotlib 3.10, Windows): `["Microsoft YaHei"]` alone → 2 missing glyphs (✔ ⚠);
 `["DejaVu Sans", "Microsoft JhengHei"]` → none. Linux containers usually have no CJK font: install one
 (Debian/Ubuntu: `fonts-noto-cjk`), then rebuild the font cache (see references/common_issues.md).
+That package ships one `.ttc` collection and matplotlib reads only its first face, so the font appears as
+**"Noto Sans CJK JP"** — never "Noto Sans CJK TC/SC". It covers all Han characters, but a few render in
+Japanese glyph forms; for exact Traditional/Simplified forms install a standalone `NotoSansTC`/`NotoSansSC`
+font file.
 Still open the PNG and look at it — a font can contain a glyph and still render the wrong one.
 
 **Figure completeness (this project's standing rule):** colour encoding a value needs a colorbar;
