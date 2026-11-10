@@ -210,6 +210,59 @@ details and working code live in each skill.
 
 ---
 
+## 2.5 Self-checks that pass because they cannot fail
+
+Four defects from the SGLT2-inhibitor / obesity run. Each produced a confident green tick over a
+wrong number, and **none was caught by the check that was supposed to catch it** — they were caught
+by a reviewer recomputing by hand. The pattern is the same every time: the check was written so
+that it could not fail.
+
+### 2.5.1 Assert equalities, not inequalities
+
+A lineage check compared drawn graph edges against source edge records with `pairs[t] > el[t]` and
+**passed while publishing 94 edges for a 92-edge graph**. An inequality admits an infinite set of
+wrong answers; the equality admits one right one.
+
+Two independent bugs produced the 94: a tier-blind `order.index("measured_binding") == 0` that
+reclassified a sub-threshold pair, and a read of the *unfiltered* edge list where the eligible one
+was meant. Neither would have shipped against `assert computed == expected`.
+
+**Rule:** wherever a quantity can be recomputed exactly, assert equality. Keep a genuine inequality
+(`pairs ≤ records`) as a *separate, correctly-typed* relation — do not let it stand in for the
+equality.
+
+### 2.5.2 Every check needs a negative control
+
+A check that has never been seen to fail is not known to work. Before trusting one, break the thing
+it guards and confirm it goes red: delete a row, perturb a value, re-inject the bug it was written
+for. The same run's corrected edge check was negative-controlled three ways, which is why its
+`PASS` means something.
+
+### 2.5.3 Cross-source numbers must be tied together
+
+The figure legend said 8/10/30/44; the checker said 9/10/31/44. Both ran from the same JSON, and
+nothing required them to agree, so the contradiction sat in the deliverable until a third party
+recomputed it. **When the same number is derived in two places, assert that the two derivations are
+equal** — and derive it from the one canonical field (here `list_A.rows[*].per_compound[*]
+.best_engagement`), not from whatever each site finds convenient.
+
+### 2.5.4 Backups must be write-once
+
+A figure-rebuild script crashed partway, having already overwritten three PNGs. The re-run's backup
+step then copied those **relabelled** files over the archived originals. `results/` is untracked, so
+there was no copy to restore from.
+
+```python
+if dest.exists():            # write-once: never overwrite an existing archive entry
+    continue
+shutil.copy2(src, dest)
+```
+
+Recovery was possible only because one archived file had escaped the overwrite and could serve as a
+byte-for-byte control (sha256 match) for a reconstruction. Do not rely on being that lucky.
+
+---
+
 ## 3. Figure output
 
 **Every figure must be visually complete, every time** — a standing user requirement, not a
